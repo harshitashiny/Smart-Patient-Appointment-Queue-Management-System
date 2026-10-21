@@ -162,8 +162,38 @@ export const createAppointment = async (req, res) => {
         title: 'New Appointment',
         message: `A new appointment has been booked.`,
       });
+      // Notify doctor's user room
+      io.to(`user:${doctor}`).emit('notification:new', {
+        title: 'New Appointment Booked',
+        message: `A new appointment (${appointmentId}) has been booked for ${appointmentDate.toDateString()} at ${timeSlot.start}.`,
+      });
       // Notify doctor dashboard of new appointment
-      io.to(`user:${doctor}`).emit('appointment:created', { appointmentId: appointment._id });
+      io.to(`user:${doctor}`).emit('appointment:created', {
+        appointmentId: appointment._id,
+        appointment,
+      });
+      io.to(`queue:${doctor}`).emit('queue:updated');
+
+      if (doctorProfile?._id) {
+        io.to(`user:${doctorProfile._id}`).emit('appointment:created', {
+          appointmentId: appointment._id,
+          appointment,
+        });
+        io.to(`queue:${doctorProfile._id}`).emit('queue:updated');
+      }
+
+      // Broadcast real-time appointment event to all connected dashboards
+      io.emit('appointment:new', {
+        doctor: doctor.toString(),
+        doctorId: doctorInput.toString(),
+        doctorName: doctorProfile.user?.name || '',
+        appointmentId: appointment.appointmentId,
+        patientName: req.user.name,
+        date: appointmentDate.toISOString().split('T')[0],
+        timeSlot,
+        status: appointment.status,
+      });
+
       // Broadcast real-time slot booking event so all clients update slot counts dynamically
       io.emit('slot:booked', {
         doctor: doctor.toString(),
@@ -171,13 +201,14 @@ export const createAppointment = async (req, res) => {
         date: appointmentDate.toISOString().split('T')[0],
         timeSlot,
       });
+      io.emit('queue:updated');
     } catch (e) {
-      // Socket may not be initialized in tests
+      console.error('Socket emit error:', e);
     }
 
     const populated = await Appointment.findById(appointment._id)
-      .populate('doctor', 'name email')
-      .populate('patient', 'name email');
+      .populate('doctor', 'name email phone avatar')
+      .populate('patient', 'name email phone avatar');
 
     return sendSuccess(res, { appointment: populated }, 'Appointment booked successfully', 201);
   } catch (error) {
@@ -191,14 +222,35 @@ export const createAppointment = async (req, res) => {
  */
 export const getAppointments = async (req, res) => {
   try {
-    const { status, date, page = 1, limit = 20 } = req.query;
+    const { status, date, page = 1, limit = 100 } = req.query;
     const filter = {};
 
-    // Role-based filtering
+    // Role-based filtering: strict doctor-wise appointment visibility
     if (req.user.role === 'patient') {
       filter.patient = req.user._id;
     } else if (req.user.role === 'doctor') {
-      filter.doctor = req.user._id;
+      // Find the doctor's profile and resolve all IDs matching this doctor
+      const docProfile = await Doctor.findOne({ user: req.user._id });
+      const doctorIds = [req.user._id];
+      if (docProfile) {
+        doctorIds.push(docProfile._id);
+      }
+
+      // Also match sibling doctor accounts with the same doctor name if any (e.g. registered Murali account vs seeded MIOT doctor)
+      const siblingDocs = await Doctor.find()
+        .populate({
+          path: 'user',
+          match: { role: 'doctor', name: req.user.name },
+          select: '_id name email',
+        });
+      for (const d of siblingDocs) {
+        if (d.user?._id) {
+          doctorIds.push(d.user._id);
+          doctorIds.push(d._id);
+        }
+      }
+
+      filter.doctor = { $in: doctorIds };
     }
     // Admin can see all
 
@@ -221,8 +273,17 @@ export const getAppointments = async (req, res) => {
       .skip((page - 1) * limit)
       .limit(Number(limit));
 
+    // Enhance patient object with formatted patientId
+    const formattedAppointments = appointments.map((apt) => {
+      const obj = apt.toObject();
+      if (obj.patient) {
+        obj.patient.patientId = `PAT-${String(obj.patient._id).slice(-6).toUpperCase()}`;
+      }
+      return obj;
+    });
+
     return sendSuccess(res, {
-      appointments,
+      appointments: formattedAppointments,
       pagination: {
         total,
         page: Number(page),
@@ -230,6 +291,7 @@ export const getAppointments = async (req, res) => {
       },
     });
   } catch (error) {
+    console.error('getAppointments error:', error);
     return sendError(res, 'Failed to fetch appointments', 500);
   }
 };

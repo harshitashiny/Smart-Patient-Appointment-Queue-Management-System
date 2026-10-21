@@ -3,6 +3,8 @@ import { useAuth } from '../contexts/AuthContext';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
+import { getFavorites, toggleFavorite } from '../utils/favoriteUtils';
+import { getDoctorPhoto } from '../utils/doctorPhotos';
 
 const formatTime = (timeStr) => {
   if (!timeStr) return '';
@@ -44,6 +46,36 @@ const StatusBadge = ({ status }) => {
   );
 };
 
+// Small avatar for favorites list
+const FavDoctorAvatar = ({ doc }) => {
+  const [imgError, setImgError] = useState(false);
+  const photo = getDoctorPhoto(doc || {});
+  const name = doc?.user?.name || doc?.name || '';
+  const initials = name
+    .replace(/^(Dr\.|Dr)\s*/i, '')
+    .split(' ')
+    .map((n) => n[0])
+    .join('')
+    .toUpperCase()
+    .slice(0, 2) || 'DR';
+
+  if (photo && !imgError) {
+    return (
+      <img
+        src={photo}
+        alt={name}
+        className="w-full h-full object-cover"
+        onError={() => setImgError(true)}
+      />
+    );
+  }
+  return (
+    <div className="w-full h-full bg-gradient-to-br from-teal-500 to-blue-600 flex items-center justify-center text-white font-black text-sm">
+      {initials}
+    </div>
+  );
+};
+
 export default function PatientDashboard() {
   const { user } = useAuth();
   const { t, i18n } = useTranslation();
@@ -51,11 +83,29 @@ export default function PatientDashboard() {
 
   const [loading, setLoading] = useState(true);
   const [dashData, setDashData] = useState(null);
+  const [favoriteDoctors, setFavoriteDoctors] = useState([]);
   const [dismissedReminders, setDismissedReminders] = useState(() => {
     try {
       return JSON.parse(localStorage.getItem('dismissedReminders') || '[]');
     } catch { return []; }
   });
+
+  // Load favorites from localStorage
+  const refreshFavorites = useCallback(() => {
+    const favs = getFavorites();
+    setFavoriteDoctors(favs.filter((f) => f && typeof f === 'object' && (f._id || f.user)));
+  }, []);
+
+  useEffect(() => {
+    refreshFavorites();
+    window.addEventListener('favoritesUpdated', refreshFavorites);
+    return () => window.removeEventListener('favoritesUpdated', refreshFavorites);
+  }, [refreshFavorites]);
+
+  const handleRemoveFav = (doc) => {
+    toggleFavorite(doc);
+    refreshFavorites();
+  };
 
   const fetchDashboard = useCallback(async () => {
     try {
@@ -310,6 +360,93 @@ export default function PatientDashboard() {
                 </div>
               </div>
             ))}
+          </div>
+        )}
+      </div>
+
+      {/* ── FAVORITES SECTION ── */}
+      <div className="bg-white rounded-3xl shadow-sm border border-slate-100/60 p-6 md:p-8 mb-8">
+        <div className="flex items-center justify-between mb-5">
+          <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
+            <span className="text-rose-500">❤️</span>
+            {t('Favourite Doctors')}
+          </h2>
+          <button
+            onClick={() => navigate('/patient/search')}
+            className="text-xs font-bold text-teal-700 hover:text-teal-900 bg-teal-50 hover:bg-teal-100 px-3 py-1.5 rounded-xl transition-colors cursor-pointer"
+          >
+            {t('Browse Doctors')} →
+          </button>
+        </div>
+
+        {favoriteDoctors.length === 0 ? (
+          <div className="py-12 flex flex-col items-center justify-center bg-rose-50/40 rounded-2xl border-2 border-dashed border-rose-100">
+            <span className="text-4xl mb-3">🩺</span>
+            <p className="font-semibold text-slate-600 mb-1">{t('No favourite doctors yet')}</p>
+            <p className="text-xs text-slate-400 mb-4">{t('Tap the ❤️ on any doctor card to save them here')}</p>
+            <button
+              onClick={() => navigate('/patient/search')}
+              className="px-5 py-2.5 bg-gradient-to-r from-rose-500 to-pink-500 text-white font-bold text-xs rounded-xl shadow-md cursor-pointer"
+            >
+              {t('Find Doctors')}
+            </button>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {favoriteDoctors.map((doc) => {
+              const docId = doc._id;
+              const name = doc.user?.name || doc.name || 'Dr. Specialist';
+              const spec = doc.specialization || '';
+              const exp = doc.experience || 0;
+              const fee = doc.consultationFee || 600;
+              const rating = doc.rating || 4.9;
+              return (
+                <div
+                  key={docId || name}
+                  className="flex items-center gap-3 p-4 rounded-2xl bg-gradient-to-r from-rose-50 to-pink-50 border border-rose-100 hover:border-rose-300 hover:shadow-md transition-all group"
+                >
+                  {/* Avatar */}
+                  <div className="w-14 h-14 rounded-2xl overflow-hidden shrink-0 border border-rose-200/60 shadow-sm">
+                    <FavDoctorAvatar doc={doc} />
+                  </div>
+
+                  {/* Info */}
+                  <div className="flex-1 min-w-0">
+                    <p className="font-black text-slate-800 text-sm truncate group-hover:text-teal-700 transition-colors">
+                      {name}
+                    </p>
+                    <p className="text-[11px] font-bold text-teal-700 truncate">{spec}</p>
+                    <div className="flex items-center gap-2 mt-1">
+                      <span className="text-[10px] text-amber-600 font-bold">★ {rating}</span>
+                      <span className="text-[10px] text-slate-400">·</span>
+                      <span className="text-[10px] text-slate-500 font-semibold">{exp} yr{exp !== 1 ? 's' : ''}</span>
+                      <span className="text-[10px] text-slate-400">·</span>
+                      <span className="text-[10px] text-teal-700 font-bold">₹{fee}</span>
+                    </div>
+                  </div>
+
+                  {/* Actions */}
+                  <div className="flex flex-col gap-1.5 shrink-0">
+                    {docId && (
+                      <button
+                        onClick={() => navigate(`/patient/book/${docId}`)}
+                        title={t('Book Appointment')}
+                        className="w-8 h-8 rounded-xl bg-teal-600 hover:bg-teal-700 text-white flex items-center justify-center shadow-sm transition-colors cursor-pointer"
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><rect width="18" height="18" x="3" y="4" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                      </button>
+                    )}
+                    <button
+                      onClick={() => handleRemoveFav(doc)}
+                      title={t('Remove from Favourites')}
+                      className="w-8 h-8 rounded-xl bg-rose-100 hover:bg-rose-200 text-rose-500 flex items-center justify-center shadow-sm transition-colors cursor-pointer"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="1.5"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
       </div>

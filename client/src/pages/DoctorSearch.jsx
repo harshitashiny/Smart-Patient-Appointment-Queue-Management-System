@@ -86,17 +86,32 @@ export default function DoctorSearch() {
   const [selectedLocation, setSelectedLocation] = useState(searchParams.get('location') || 'all');
   const [showOnlyFavorites, setShowOnlyFavorites] = useState(false);
   const [favMap, setFavMap] = useState({});
+  const [favoriteDoctors, setFavoriteDoctors] = useState([]);
+  const [showFavoritesList, setShowFavoritesList] = useState(true);
 
   // Listen to favorite updates
   const refreshFavMap = useCallback(() => {
     const favs = getFavorites();
     const map = {};
+    const validFavs = [];
+
     favs.forEach((f) => {
-      const id = typeof f === 'string' ? f : f._id;
-      if (id) map[id] = true;
+      const id = typeof f === 'string' ? f : f?._id;
+      if (id) {
+        map[id] = true;
+        // Resolve from currently loaded doctors if possible, or fallback to stored object
+        const match = doctors.find((d) => d._id === id);
+        if (match) {
+          validFavs.push(match);
+        } else if (typeof f === 'object' && f?._id) {
+          validFavs.push(f);
+        }
+      }
     });
+
     setFavMap(map);
-  }, []);
+    setFavoriteDoctors(validFavs);
+  }, [doctors]);
 
   useEffect(() => {
     refreshFavMap();
@@ -104,6 +119,11 @@ export default function DoctorSearch() {
     window.addEventListener('favoritesUpdated', handleFavChange);
     return () => window.removeEventListener('favoritesUpdated', handleFavChange);
   }, [refreshFavMap]);
+
+  const handleRemoveFavorite = (doc) => {
+    toggleFavorite(doc);
+    refreshFavMap();
+  };
 
   // Sync state with URL search params changes
   useEffect(() => {
@@ -268,6 +288,11 @@ export default function DoctorSearch() {
           >
             <span>❤️</span>
             <span>{t('Favorites')}</span>
+            {favoriteDoctors.length > 0 && (
+              <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-black ${showOnlyFavorites ? 'bg-white/20 text-white' : 'bg-rose-100 text-rose-700'}`}>
+                {favoriteDoctors.length}
+              </span>
+            )}
           </button>
 
           {/* Clear Filters */}
@@ -377,6 +402,94 @@ export default function DoctorSearch() {
         </div>
       </div>
 
+      {/* ── FAVORITE DOCTORS LIST ON THIS PAGE (WITH DIRECT REMOVE OPTION) ── */}
+      {favoriteDoctors.length > 0 && (
+        <div className="bg-gradient-to-r from-rose-50/80 via-pink-50/50 to-white rounded-3xl border-2 border-rose-100 p-5 sm:p-6 shadow-sm">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2.5">
+              <span className="text-2xl animate-pulse">❤️</span>
+              <div>
+                <h2 className="text-base sm:text-lg font-black text-slate-800 flex items-center gap-2">
+                  <span>{t('Favourite Doctors')}</span>
+                  <span className="text-xs font-bold text-rose-600 bg-rose-100 px-2.5 py-0.5 rounded-full">
+                    {favoriteDoctors.length} {favoriteDoctors.length === 1 ? 'doctor' : 'doctors'} saved
+                  </span>
+                </h2>
+                <p className="text-[11px] text-slate-500">
+                  Quick access to your saved specialists. Click "✕ Remove" to remove from your favourites list anytime.
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={() => setShowFavoritesList(!showFavoritesList)}
+              className="text-xs font-bold text-rose-700 hover:text-rose-900 bg-white hover:bg-rose-100 px-3 py-1.5 rounded-xl border border-rose-200 transition-all cursor-pointer shadow-xs"
+            >
+              {showFavoritesList ? t('Hide') + ' ▲' : t('Show') + ' ▼'}
+            </button>
+          </div>
+
+          {showFavoritesList && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
+              {favoriteDoctors.map((doc) => {
+                const docId = doc._id;
+                const name = doc.user?.name || doc.name || 'Dr. Specialist';
+                const spec = doc.specialization || '';
+                const exp = doc.experience || 0;
+                const fee = doc.consultationFee || 600;
+                const rating = doc.rating || 4.9;
+
+                return (
+                  <div
+                    key={docId || name}
+                    className="flex items-center gap-3 p-3.5 rounded-2xl bg-white border border-rose-100/90 hover:border-rose-300 hover:shadow-md transition-all group relative"
+                  >
+                    {/* Doctor Avatar */}
+                    <div className="w-13 h-13 rounded-xl overflow-hidden shrink-0 border border-slate-100 shadow-2xs">
+                      <DoctorAvatar name={name} avatar={doc.user?.avatar} doc={doc} />
+                    </div>
+
+                    {/* Info */}
+                    <div className="flex-1 min-w-0 pr-1">
+                      <p className="font-black text-slate-800 text-xs sm:text-sm truncate group-hover:text-teal-700 transition-colors">
+                        {name}
+                      </p>
+                      <p className="text-[11px] font-bold text-teal-700 truncate">{spec}</p>
+                      <div className="flex items-center gap-1.5 mt-0.5 text-[10px] text-slate-500 font-semibold">
+                        <span className="text-amber-600 font-bold">★ {rating}</span>
+                        <span>•</span>
+                        <span>{exp} yr{exp !== 1 ? 's' : ''}</span>
+                        <span>•</span>
+                        <span className="font-bold text-slate-800">₹{fee}</span>
+                      </div>
+                    </div>
+
+                    {/* Actions: Book & Remove */}
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button
+                        onClick={() => navigate(`/patient/book/${docId}`)}
+                        className="px-2.5 py-1.5 bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold rounded-xl shadow-xs transition-colors cursor-pointer flex items-center gap-1"
+                        title={t('Book Appointment')}
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><rect width="18" height="18" x="3" y="4" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                        <span>{t('Book')}</span>
+                      </button>
+                      <button
+                        onClick={() => handleRemoveFavorite(doc)}
+                        className="px-2 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 hover:text-rose-800 text-xs font-bold rounded-xl border border-rose-200 transition-colors cursor-pointer flex items-center gap-1"
+                        title={t('Remove from Favourites')}
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                        <span className="hidden sm:inline">{t('Remove')}</span>
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* ── DOCTORS LIST ── */}
       {loading ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -399,8 +512,14 @@ export default function DoctorSearch() {
           <div className="w-16 h-16 bg-teal-50 rounded-2xl flex items-center justify-center text-teal-600 mx-auto mb-4">
             <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
           </div>
-          <h3 className="text-lg font-black text-slate-800 mb-1">{t('No doctors found')}</h3>
-          <p className="text-slate-500 text-xs mb-5">{t('Try searching another keyword or specialty')}</p>
+          <h3 className="text-lg font-black text-slate-800 mb-1">
+            {showOnlyFavorites ? t('No favourite doctors yet') : t('No doctors found')}
+          </h3>
+          <p className="text-slate-500 text-xs mb-5">
+            {showOnlyFavorites
+              ? t('Tap the ❤️ icon on any doctor card to add them to your favourites list.')
+              : t('Try searching another keyword or specialty')}
+          </p>
           <button
             onClick={handleClearFilters}
             className="px-5 py-2.5 bg-gradient-to-r from-teal-600 to-blue-600 text-white font-bold text-xs rounded-xl shadow-md cursor-pointer"
@@ -514,7 +633,11 @@ export default function DoctorSearch() {
                   <div className="grid grid-cols-2 gap-2 mt-3 p-2 bg-slate-50/80 rounded-2xl border border-slate-100 text-center">
                     <div>
                       <p className="text-[10px] font-bold text-slate-400 uppercase">{t('Experience')}</p>
-                      <p className="text-xs font-black text-slate-800">{t(doc.experienceDisplay || `${doc.experience || 10}+ Years`)}</p>
+                      <p className="text-xs font-black text-slate-800">
+                        {doc.experience
+                          ? `${doc.experience} year${doc.experience !== 1 ? 's' : ''}`
+                          : doc.experienceDisplay || '—'}
+                      </p>
                     </div>
                     <div>
                       <p className="text-[10px] font-bold text-slate-400 uppercase">{t('Fee')}</p>

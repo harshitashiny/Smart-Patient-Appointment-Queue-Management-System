@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import api from '../services/api';
-import { getSocket, joinQueueRoom, leaveQueueRoom } from '../services/socket';
+import { getSocket, joinUserRoom, joinQueueRoom, leaveQueueRoom } from '../services/socket';
 import {
   Stethoscope, Users, Calendar, Clock, CheckCircle2, ChevronRight,
   AlertCircle, Phone, Mail, Award, MapPin, Building, User,
   Volume2, Play, Check, X, Shield, RefreshCw, Edit3, Save,
-  FileText, Activity, Filter, Eye
+  FileText, Activity, Filter, Eye, Bell
 } from 'lucide-react';
 
 export default function DoctorDashboard() {
@@ -65,10 +65,10 @@ export default function DoctorDashboard() {
     }
   }, [user?._id]);
 
-  // Fetch Appointments
+  // Fetch Appointments (doctor-wise appointments for the logged-in doctor)
   const fetchAppointments = useCallback(async () => {
     try {
-      const res = await api.get('/appointments');
+      const res = await api.get('/appointments?limit=100');
       if (res.data?.data?.appointments) {
         setAppointments(res.data.data.appointments);
       }
@@ -109,11 +109,17 @@ export default function DoctorDashboard() {
     loadDoctorData();
   }, [loadDoctorData]);
 
-  // Socket.IO Real-time updates
+  // Socket.IO Real-time updates for automatic doctor appointment sync
   useEffect(() => {
     if (!user?._id) return;
 
+    // Join both user room and queue room for targeted events
+    joinUserRoom(user._id);
     joinQueueRoom(user._id);
+    if (profile?._id) {
+      joinQueueRoom(profile._id);
+    }
+
     const socket = getSocket();
 
     const handleQueueUpdate = () => {
@@ -121,22 +127,63 @@ export default function DoctorDashboard() {
       fetchAppointments();
     };
 
-    const handleSlotBooked = (data) => {
-      // If the slot booking is for this doctor, refresh appointments
-      if (data.doctor && data.doctor === user._id) {
+    const handleAppointmentNew = (data) => {
+      // Check if this appointment is for the logged in doctor
+      const myDoctorIds = [
+        String(user._id),
+        profile?._id ? String(profile._id) : '',
+      ].filter(Boolean);
+
+      const isForMe =
+        myDoctorIds.includes(String(data?.doctor)) ||
+        myDoctorIds.includes(String(data?.doctorId)) ||
+        (data?.doctorName && user?.name && data.doctorName.toLowerCase() === user.name.toLowerCase());
+
+      if (isForMe || !data?.doctor) {
         fetchAppointments();
+        fetchQueue();
+        showNotification(
+          `🔔 New appointment booked for you! Patient: ${data?.patientName || 'New Patient'} (${data?.timeSlot?.start || ''})`,
+          'success'
+        );
+      }
+    };
+
+    const handleSlotBooked = (data) => {
+      const myDoctorIds = [
+        String(user._id),
+        profile?._id ? String(profile._id) : '',
+      ].filter(Boolean);
+
+      if (myDoctorIds.includes(String(data?.doctor)) || myDoctorIds.includes(String(data?.doctorId))) {
+        fetchAppointments();
+        fetchQueue();
       }
     };
 
     socket.on('queue:updated', handleQueueUpdate);
+    socket.on('appointment:created', handleQueueUpdate);
+    socket.on('appointment:new', handleAppointmentNew);
     socket.on('slot:booked', handleSlotBooked);
+    socket.on('notification:new', handleQueueUpdate);
+
+    // Bulletproof periodic fallback (8 seconds) to ensure real-time visibility
+    const autoRefreshInterval = setInterval(() => {
+      fetchAppointments();
+      fetchQueue();
+    }, 8000);
 
     return () => {
       leaveQueueRoom(user._id);
+      if (profile?._id) leaveQueueRoom(profile._id);
       socket.off('queue:updated', handleQueueUpdate);
+      socket.off('appointment:created', handleQueueUpdate);
+      socket.off('appointment:new', handleAppointmentNew);
       socket.off('slot:booked', handleSlotBooked);
+      socket.off('notification:new', handleQueueUpdate);
+      clearInterval(autoRefreshInterval);
     };
-  }, [user?._id, fetchQueue, fetchAppointments]);
+  }, [user?._id, user?.name, profile?._id, fetchQueue, fetchAppointments]);
 
   // Show status banner with auto dismiss
   const showNotification = (text, type = 'success') => {
@@ -242,22 +289,27 @@ export default function DoctorDashboard() {
               {user?.name ? user.name.replace(/^Dr\.\s*/i, '').charAt(0) : 'D'}
             </div>
             <div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <span className="px-2.5 py-0.5 rounded-full bg-blue-500/30 text-blue-200 border border-blue-400/30 text-[11px] font-bold tracking-wide uppercase">
                   Doctor Console
                 </span>
                 <span className="flex items-center gap-1 text-[11px] text-emerald-300 font-semibold bg-emerald-500/20 px-2 py-0.5 rounded-full border border-emerald-400/20">
                   <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                  Live Sync
+                  Live Sync Active
+                </span>
+                <span className="px-2.5 py-0.5 rounded-full bg-indigo-500/40 text-indigo-100 border border-indigo-400/30 font-mono text-[11px] font-bold">
+                  Doctor ID: {user?._id ? `DOC-${String(user._id).slice(-6).toUpperCase()}` : '—'}
                 </span>
               </div>
               <h1 className="text-2xl sm:text-3xl font-black tracking-tight mt-1">
                 {user?.name?.startsWith('Dr.') ? user?.name : `Dr. ${user?.name || 'Doctor'}`}
               </h1>
-              <p className="text-blue-100 text-xs sm:text-sm mt-0.5 flex items-center gap-2 font-medium">
+              <p className="text-blue-100 text-xs sm:text-sm mt-0.5 flex flex-wrap items-center gap-2 font-medium">
                 <span>{profile?.specialization || 'Specialist'}</span>
                 <span>•</span>
-                <span>{profile?.clinicName || 'SmartCare Hospital'}</span>
+                <span>{profile?.clinicName || 'MIOT International'}</span>
+                <span>•</span>
+                <span className="font-mono text-blue-200 text-xs select-all">UID: {user?._id || '—'}</span>
               </p>
             </div>
           </div>
@@ -270,7 +322,7 @@ export default function DoctorDashboard() {
                 showNotification('Data refreshed', 'success');
               }}
               className="p-3 bg-white/10 hover:bg-white/20 text-white rounded-xl backdrop-blur-sm border border-white/20 transition-all cursor-pointer"
-              title="Refresh Queue"
+              title="Refresh Queue & Appointments"
             >
               <RefreshCw size={18} />
             </button>
@@ -286,7 +338,21 @@ export default function DoctorDashboard() {
         </div>
 
         {/* Quick Stats Grid */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-6 pt-6 border-t border-white/10">
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mt-6 pt-6 border-t border-white/10">
+          <div
+            onClick={() => setActiveTab('appointments')}
+            className="bg-white/10 hover:bg-white/15 cursor-pointer transition-all backdrop-blur-md rounded-2xl p-3 border border-white/15 group"
+            title="Click to view all appointments"
+          >
+            <div className="text-xs text-blue-100 font-semibold flex items-center justify-between">
+              <span>Booked Appts</span>
+              <span className="text-[10px] text-teal-300 font-bold group-hover:underline">View →</span>
+            </div>
+            <div className="text-2xl font-black mt-0.5 text-white flex items-center gap-1.5">
+              <span>{appointments.length}</span>
+              <span className="text-xs font-normal text-blue-200">total</span>
+            </div>
+          </div>
           <div className="bg-white/5 backdrop-blur-md rounded-2xl p-3 border border-white/10">
             <div className="text-xs text-blue-200 font-medium">Waiting in Queue</div>
             <div className="text-2xl font-black mt-0.5 text-white">{queueData.summary.totalWaiting}</div>
@@ -437,8 +503,25 @@ export default function DoctorDashboard() {
                 </div>
                 <h3 className="text-base font-bold text-slate-700">No Patients in Queue</h3>
                 <p className="text-xs text-slate-400 max-w-sm mx-auto mt-1">
-                  Patients will appear here automatically as soon as they check in for their appointments today.
+                  Patients will appear in the active queue as soon as they check in for their appointments today.
                 </p>
+                {appointments.length > 0 && (
+                  <div className="mt-5 p-4 rounded-2xl bg-blue-50/70 border border-blue-100 max-w-md mx-auto">
+                    <p className="text-xs font-bold text-blue-900 mb-1">
+                      📅 You have {appointments.length} booked appointment{appointments.length !== 1 ? 's' : ''} on file!
+                    </p>
+                    <p className="text-[11px] text-blue-600 mb-3">
+                      View all patient details, IDs, dates, time slots, and status in the Appointments tab.
+                    </p>
+                    <button
+                      onClick={() => setActiveTab('appointments')}
+                      className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl shadow-sm transition-all cursor-pointer inline-flex items-center gap-1.5"
+                    >
+                      <Calendar size={13} />
+                      <span>View Doctor Appointments ({appointments.length})</span>
+                    </button>
+                  </div>
+                )}
               </div>
             ) : (
               <div className="divide-y divide-slate-100">
@@ -584,60 +667,110 @@ export default function DoctorDashboard() {
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs">
-                <thead className="bg-slate-50 text-slate-500 font-bold uppercase tracking-wider border-b border-slate-100">
+                <thead className="bg-slate-50 text-slate-600 font-black uppercase tracking-wider border-b border-slate-200">
                   <tr>
-                    <th className="py-3 px-4">Token / ID</th>
-                    <th className="py-3 px-4">Patient</th>
-                    <th className="py-3 px-4">Date & Slot</th>
-                    <th className="py-3 px-4">Status</th>
-                    <th className="py-3 px-4">Reason</th>
-                    <th className="py-3 px-4 text-right">Actions</th>
+                    <th className="py-3.5 px-4">Patient Name</th>
+                    <th className="py-3.5 px-4">Patient ID</th>
+                    <th className="py-3.5 px-4">Date</th>
+                    <th className="py-3.5 px-4">Time Slot</th>
+                    <th className="py-3.5 px-4">Status</th>
+                    <th className="py-3.5 px-4">Token / Appt ID</th>
+                    <th className="py-3.5 px-4">Reason</th>
+                    <th className="py-3.5 px-4 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {filteredAppointments.map((apt) => (
-                    <tr key={apt._id} className="hover:bg-slate-50/70 transition-colors">
-                      <td className="py-3.5 px-4 font-bold text-slate-800">
-                        <span className="px-2 py-1 rounded-lg bg-blue-50 text-blue-700 font-mono text-[11px]">
-                          #{apt.tokenNumber || apt.appointmentId?.slice(-4) || '—'}
-                        </span>
-                      </td>
-                      <td className="py-3.5 px-4">
-                        <div className="font-bold text-slate-800">{apt.patient?.name || 'Patient'}</div>
-                        <div className="text-[11px] text-slate-400">{apt.patient?.phone || apt.patient?.email}</div>
-                      </td>
-                      <td className="py-3.5 px-4">
-                        <div className="font-semibold text-slate-700">{new Date(apt.date).toLocaleDateString()}</div>
-                        <div className="text-[11px] text-slate-400">
-                          {apt.timeSlot?.start} – {apt.timeSlot?.end}
-                        </div>
-                      </td>
-                      <td className="py-3.5 px-4">
-                        <span
-                          className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
-                            apt.status === 'completed'
-                              ? 'bg-emerald-100 text-emerald-800'
-                              : apt.status === 'in-consultation'
-                              ? 'bg-amber-100 text-amber-800'
-                              : apt.status === 'checked-in'
-                              ? 'bg-blue-100 text-blue-800'
-                              : 'bg-slate-100 text-slate-600'
-                          }`}
-                        >
-                          {apt.status}
-                        </span>
-                      </td>
-                      <td className="py-3.5 px-4 text-slate-600 max-w-xs truncate">{apt.reason || 'General Checkup'}</td>
-                      <td className="py-3.5 px-4 text-right">
-                        <button
-                          onClick={() => setSelectedPatient(apt.patient)}
-                          className="px-2.5 py-1.5 bg-slate-100 hover:bg-blue-50 hover:text-blue-600 rounded-lg text-xs font-bold transition-colors cursor-pointer"
-                        >
-                          Details
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
+                  {filteredAppointments.map((apt) => {
+                    const patientId = apt.patient?.patientId || (apt.patient?._id ? `PAT-${String(apt.patient._id).slice(-6).toUpperCase()}` : 'PAT-GEN');
+                    const patientName = apt.patient?.name || 'Patient';
+                    const aptDate = apt.date ? new Date(apt.date) : null;
+                    const formattedDate = aptDate && !isNaN(aptDate)
+                      ? aptDate.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
+                      : 'N/A';
+                    const dayOfWeek = aptDate && !isNaN(aptDate)
+                      ? aptDate.toLocaleDateString(undefined, { weekday: 'short' })
+                      : '';
+                    const timeSlotStr = apt.timeSlot?.start ? `${apt.timeSlot.start} – ${apt.timeSlot.end || ''}` : 'Standard';
+
+                    return (
+                      <tr key={apt._id} className="hover:bg-blue-50/40 transition-colors">
+                        {/* 1. Patient Name */}
+                        <td className="py-3.5 px-4">
+                          <div className="flex items-center gap-2.5">
+                            <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-blue-600 to-indigo-600 text-white font-black flex items-center justify-center text-xs shrink-0 shadow-xs">
+                              {patientName.replace(/^(Mr\.|Ms\.|Mrs\.)\s*/i, '').charAt(0) || 'P'}
+                            </div>
+                            <div>
+                              <div className="font-bold text-slate-900 text-xs sm:text-sm">{patientName}</div>
+                              <div className="text-[11px] text-slate-400">{apt.patient?.phone || apt.patient?.email || 'No contact'}</div>
+                            </div>
+                          </div>
+                        </td>
+
+                        {/* 2. Patient ID */}
+                        <td className="py-3.5 px-4">
+                          <div className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-teal-50 border border-teal-200/80 text-teal-800 font-mono font-bold text-xs" title={`Full ID: ${apt.patient?._id || ''}`}>
+                            <span className="text-[10px] text-teal-600 font-semibold">ID:</span>
+                            <span>{patientId}</span>
+                          </div>
+                        </td>
+
+                        {/* 3. Date */}
+                        <td className="py-3.5 px-4">
+                          <div className="font-bold text-slate-800">{formattedDate}</div>
+                          <div className="text-[10px] text-slate-400 font-medium">{dayOfWeek}</div>
+                        </td>
+
+                        {/* 4. Time Slot */}
+                        <td className="py-3.5 px-4">
+                          <span className="inline-block px-2.5 py-1 rounded-lg bg-indigo-50 border border-indigo-100 text-indigo-700 font-bold font-mono text-xs">
+                            {timeSlotStr}
+                          </span>
+                        </td>
+
+                        {/* 5. Status */}
+                        <td className="py-3.5 px-4">
+                          <span
+                            className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider ${
+                              apt.status === 'completed'
+                                ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                                : apt.status === 'in-consultation'
+                                ? 'bg-amber-100 text-amber-800 border border-amber-200 animate-pulse'
+                                : apt.status === 'checked-in'
+                                ? 'bg-blue-100 text-blue-800 border border-blue-200'
+                                : apt.status === 'confirmed'
+                                ? 'bg-teal-100 text-teal-800 border border-teal-200'
+                                : 'bg-slate-100 text-slate-600'
+                            }`}
+                          >
+                            <span className="w-1.5 h-1.5 rounded-full bg-current" />
+                            {apt.status}
+                          </span>
+                        </td>
+
+                        {/* Token / ID */}
+                        <td className="py-3.5 px-4">
+                          <span className="font-bold font-mono text-xs text-slate-800">
+                            #{apt.tokenNumber || '—'}
+                          </span>
+                          <span className="block text-[10px] font-mono text-slate-400">{apt.appointmentId}</span>
+                        </td>
+
+                        {/* Reason */}
+                        <td className="py-3.5 px-4 text-slate-600 max-w-xs truncate">{apt.reason || 'General Consultation'}</td>
+
+                        {/* Actions */}
+                        <td className="py-3.5 px-4 text-right">
+                          <button
+                            onClick={() => setSelectedPatient(apt.patient)}
+                            className="px-3 py-1.5 bg-slate-100 hover:bg-blue-50 hover:text-blue-700 rounded-lg text-xs font-bold transition-colors cursor-pointer"
+                          >
+                            Details
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
