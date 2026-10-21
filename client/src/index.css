@@ -1,0 +1,40 @@
+@import "tailwindcss";
+
+@layer base {
+  html {
+    min-height: 100vh;
+    background-color: #f0f7ff;
+  }
+
+  body {
+    min-height: 100vh;
+    color: #1e293b;
+    position: relative;
+    /* Aesthetic light blue background with visible medical heartbeat pattern */
+    background-color: #f0f7ff;
+    background-image: 
+      linear-gradient(rgba(240, 247, 255, 0.42), rgba(225, 239, 254, 0.52)),
+      url('/heart-bg.png');
+    background-size: cover;
+    background-position: center center;
+    background-repeat: no-repeat;
+    background-attachment: fixed;
+    /* Smooth mobile tap and scrolling */
+    -webkit-tap-highlight-color: transparent;
+    -webkit-touch-callout: none;
+    overscroll-behavior-y: none;
+  }
+
+  /* Safe area for iPhone home indicator and bottom nav */
+  .safe-area-bottom {
+    padding-bottom: max(8px, env(safe-area-inset-bottom));
+  }
+
+  /* On mobile viewports, prevent bottom nav from overlapping scrollable page content */
+  @media (max-width: 768px) {
+    #root {
+      padding-bottom: calc(64px + env(safe-area-inset-bottom, 0px));
+    }
+  }
+}
+

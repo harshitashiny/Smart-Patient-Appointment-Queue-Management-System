@@ -1,0 +1,30 @@
+{
+  "name": "smartcare-server",
+  "version": "1.0.0",
+  "description": "SmartCare Healthcare Platform - Express Backend",
+  "main": "src/server.js",
+  "type": "module",
+  "scripts": {
+    "dev": "nodemon src/server.js",
+    "start": "node src/server.js",
+    "seed": "node src/seed/seed.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "express-rate-limit": "^7.0.0",
+    "helmet": "^7.0.0",
+    "i18next": "^23.7.1",
+    "i18next-fs-backend": "^2.2.0",
+    "i18next-http-middleware": "^3.3.2",
+    "jsonwebtoken": "^9.0.2",
+    "mongoose": "^7.5.0",
+    "multer": "^2.4.0",
+    "socket.io": "^4.7.2"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.3"
+  }
+}

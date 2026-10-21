@@ -1,0 +1,17 @@
+{
+  "short_name": "SmartCare",
+  "name": "MIOT International - SmartCare Hospital App",
+  "icons": [
+    {
+      "src": "/vite.svg",
+      "type": "image/svg+xml",
+      "sizes": "192x192 512x512"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#0B2545",
+  "theme_color": "#0B2545",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "scope": "/"
+}
