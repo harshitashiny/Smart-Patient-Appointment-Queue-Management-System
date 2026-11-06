@@ -21,25 +21,29 @@ const connectDB = async () => {
     console.error('👉 In Render dashboard -> Environment tab, add:');
     console.error('   Key: MONGODB_URI');
     console.error('   Value: mongodb+srv://<username>:<password>@cluster0.xxxxx.mongodb.net/smartcare?retryWrites=true&w=majority\n');
-    process.exit(1);
+    return null;
   }
 
   // Validate scheme
   if (!mongoURI.startsWith('mongodb://') && !mongoURI.startsWith('mongodb+srv://')) {
     console.error('\n❌ Invalid MONGODB_URI scheme!');
-    console.error(`👉 Your connection string starts with: "${mongoURI.substring(0, 20)}..."`);
+    console.error(`👉 Received MONGODB_URI starting with: "${mongoURI.substring(0, 20)}..."`);
     console.error('   A valid MongoDB connection string MUST start with:');
     console.error('   "mongodb+srv://" (for MongoDB Atlas cloud) or "mongodb://" (for standalone MongoDB)');
     console.error('   Example: mongodb+srv://user:pass@cluster0.xyz.mongodb.net/smartcare?retryWrites=true&w=majority\n');
-    process.exit(1);
+    return null;
   }
 
   try {
-    const conn = await mongoose.connect(mongoURI);
+    const conn = await mongoose.connect(mongoURI, {
+      serverSelectionTimeoutMS: 5000,
+    });
     console.log(`✅ MongoDB Connected: ${conn.connection.host}`);
+    return conn;
   } catch (error) {
     console.error(`❌ MongoDB Connection Error: ${error.message}`);
-    process.exit(1);
+    console.error('👉 If using MongoDB Atlas, make sure you added 0.0.0.0/0 under Network Access.');
+    return null;
   }
 };
 
