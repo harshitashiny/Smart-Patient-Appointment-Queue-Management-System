@@ -6,7 +6,15 @@ import Patient from '../models/Patient.js';
 import Department from '../models/Department.js';
 import Hospital from '../models/Hospital.js';
 
-dotenv.config({ path: '../.env' });
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+dotenv.config({ path: path.join(__dirname, '../../.env') });
+dotenv.config({ path: path.join(__dirname, '../.env') });
+dotenv.config();
 
 // 20 Standard Medical Departments matching MIOT International Directory
 const departmentsData = [
