@@ -53,6 +53,17 @@ const userSchema = new mongoose.Schema(
         return this.role !== 'doctor'; // Doctors need approval
       },
     },
+    approvalStatus: {
+      type: String,
+      enum: ['pending', 'approved', 'rejected'],
+      default: function () {
+        return this.role === 'doctor' ? 'pending' : 'approved';
+      },
+    },
+    rejectionReason: {
+      type: String,
+      default: '',
+    },
     preferredLang: {
       type: String,
       enum: ['en', 'ta', 'te', 'hi'],

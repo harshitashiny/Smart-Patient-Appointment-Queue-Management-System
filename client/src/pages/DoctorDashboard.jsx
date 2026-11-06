@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import { useTranslation } from 'react-i18next';
 import api from '../services/api';
 import { getSocket, joinUserRoom, joinQueueRoom, leaveQueueRoom } from '../services/socket';
+import LanguageSelector from '../components/LanguageSelector';
 import {
   Stethoscope, Users, Calendar, Clock, CheckCircle2, ChevronRight,
   AlertCircle, Phone, Mail, Award, MapPin, Building, User,
@@ -11,6 +13,8 @@ import {
 
 export default function DoctorDashboard() {
   const { user, profile, fetchUser } = useAuth();
+  const { t } = useTranslation();
+  const [emergencyAlert, setEmergencyAlert] = useState(null);
 
   const [activeTab, setActiveTab] = useState('queue'); // 'queue' | 'appointments' | 'schedule' | 'profile'
   const [loading, setLoading] = useState(true);
@@ -167,6 +171,13 @@ export default function DoctorDashboard() {
     socket.on('slot:booked', handleSlotBooked);
     socket.on('notification:new', handleQueueUpdate);
 
+    // Emergency appointment alert
+    const handleEmergency = (data) => {
+      setEmergencyAlert(data);
+      fetchQueue();
+    };
+    socket.on('emergency:new', handleEmergency);
+
     // Bulletproof periodic fallback (8 seconds) to ensure real-time visibility
     const autoRefreshInterval = setInterval(() => {
       fetchAppointments();
@@ -179,6 +190,7 @@ export default function DoctorDashboard() {
       socket.off('queue:updated', handleQueueUpdate);
       socket.off('appointment:created', handleQueueUpdate);
       socket.off('appointment:new', handleAppointmentNew);
+      socket.off('emergency:new', handleEmergency);
       socket.off('slot:booked', handleSlotBooked);
       socket.off('notification:new', handleQueueUpdate);
       clearInterval(autoRefreshInterval);
@@ -279,6 +291,26 @@ export default function DoctorDashboard() {
         </div>
       )}
 
+      {/* Emergency Alert Banner */}
+      {emergencyAlert && (
+        <div className="bg-red-600 text-white rounded-2xl p-4 shadow-xl border-2 border-red-400 animate-pulse mb-4 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <span className="text-2xl">🚨</span>
+            <div>
+              <p className="font-black text-sm">{t('EMERGENCY PATIENT ALERT')}</p>
+              <p className="text-xs text-red-100 font-medium">
+                {emergencyAlert.patientName} — {emergencyAlert.emergencyType} · {t('Priority Token')} #{emergencyAlert.tokenNumber}
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => setEmergencyAlert(null)}
+            className="p-2 bg-red-700 hover:bg-red-800 rounded-lg cursor-pointer"
+          >
+            <X size={16} />
+          </button>
+        </div>
+      )}
       {/* Header Banner */}
       <div className="bg-gradient-to-r from-blue-700 via-indigo-700 to-indigo-900 text-white rounded-3xl p-6 sm:p-8 shadow-xl relative overflow-hidden">
         <div className="absolute right-0 top-0 bottom-0 w-1/3 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-white/10 via-transparent to-transparent pointer-events-none" />
@@ -291,21 +323,21 @@ export default function DoctorDashboard() {
             <div>
               <div className="flex flex-wrap items-center gap-2">
                 <span className="px-2.5 py-0.5 rounded-full bg-blue-500/30 text-blue-200 border border-blue-400/30 text-[11px] font-bold tracking-wide uppercase">
-                  Doctor Console
+                  {t('Doctor Console')}
                 </span>
                 <span className="flex items-center gap-1 text-[11px] text-emerald-300 font-semibold bg-emerald-500/20 px-2 py-0.5 rounded-full border border-emerald-400/20">
                   <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                  Live Sync Active
+                  {t('Live Sync Active')}
                 </span>
                 <span className="px-2.5 py-0.5 rounded-full bg-indigo-500/40 text-indigo-100 border border-indigo-400/30 font-mono text-[11px] font-bold">
-                  Doctor ID: {user?._id ? `DOC-${String(user._id).slice(-6).toUpperCase()}` : '—'}
+                  {t('Doctor ID')}: {user?._id ? `DOC-${String(user._id).slice(-6).toUpperCase()}` : '—'}
                 </span>
               </div>
               <h1 className="text-2xl sm:text-3xl font-black tracking-tight mt-1">
                 {user?.name?.startsWith('Dr.') ? user?.name : `Dr. ${user?.name || 'Doctor'}`}
               </h1>
               <p className="text-blue-100 text-xs sm:text-sm mt-0.5 flex flex-wrap items-center gap-2 font-medium">
-                <span>{profile?.specialization || 'Specialist'}</span>
+                <span>{profile?.specialization || t('Specialist')}</span>
                 <span>•</span>
                 <span>{profile?.clinicName || 'MIOT International'}</span>
                 <span>•</span>
@@ -315,14 +347,15 @@ export default function DoctorDashboard() {
           </div>
 
           <div className="flex items-center gap-3 w-full sm:w-auto">
+            <LanguageSelector />
             <button
               onClick={() => {
                 fetchQueue();
                 fetchAppointments();
-                showNotification('Data refreshed', 'success');
+                showNotification(t('Data refreshed'), 'success');
               }}
               className="p-3 bg-white/10 hover:bg-white/20 text-white rounded-xl backdrop-blur-sm border border-white/20 transition-all cursor-pointer"
-              title="Refresh Queue & Appointments"
+              title={t('Refresh Queue & Appointments')}
             >
               <RefreshCw size={18} />
             </button>
@@ -332,46 +365,45 @@ export default function DoctorDashboard() {
               className="flex-1 sm:flex-none px-5 py-3 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-white font-bold rounded-xl shadow-lg shadow-emerald-900/30 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
             >
               <Volume2 size={18} />
-              <span>Call Next Patient</span>
+              <span>{t('Call Next Patient')}</span>
             </button>
           </div>
         </div>
 
-        {/* Quick Stats Grid */}
-        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mt-6 pt-6 border-t border-white/10">
-          <div
-            onClick={() => setActiveTab('appointments')}
-            className="bg-white/10 hover:bg-white/15 cursor-pointer transition-all backdrop-blur-md rounded-2xl p-3 border border-white/15 group"
-            title="Click to view all appointments"
-          >
-            <div className="text-xs text-blue-100 font-semibold flex items-center justify-between">
-              <span>Booked Appts</span>
-              <span className="text-[10px] text-teal-300 font-bold group-hover:underline">View →</span>
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mt-6 pt-6 border-t border-white/10">
+            <div
+              onClick={() => setActiveTab('appointments')}
+              className="bg-white/10 hover:bg-white/15 cursor-pointer transition-all backdrop-blur-md rounded-2xl p-3 border border-white/15 group"
+              title={t('Click to view all appointments')}
+            >
+              <div className="text-xs text-blue-100 font-semibold flex items-center justify-between">
+                <span>{t('Booked Appts')}</span>
+                <span className="text-[10px] text-teal-300 font-bold group-hover:underline">{t('View')} →</span>
+              </div>
+              <div className="text-2xl font-black mt-0.5 text-white flex items-center gap-1.5">
+                <span>{appointments.length}</span>
+                <span className="text-xs font-normal text-blue-200">{t('total')}</span>
+              </div>
             </div>
-            <div className="text-2xl font-black mt-0.5 text-white flex items-center gap-1.5">
-              <span>{appointments.length}</span>
-              <span className="text-xs font-normal text-blue-200">total</span>
+            <div className="bg-white/5 backdrop-blur-md rounded-2xl p-3 border border-white/10">
+              <div className="text-xs text-blue-200 font-medium">{t('Waiting in Queue')}</div>
+              <div className="text-2xl font-black mt-0.5 text-white">{queueData.summary.totalWaiting}</div>
+            </div>
+            <div className="bg-white/5 backdrop-blur-md rounded-2xl p-3 border border-white/10">
+              <div className="text-xs text-blue-200 font-medium">{t('In Consultation')}</div>
+              <div className="text-2xl font-black mt-0.5 text-amber-300">
+                {queueData.summary.currentlyConsulting ? `${t('Token')} #${queueData.summary.currentlyConsulting.tokenNumber}` : t('None')}
+              </div>
+            </div>
+            <div className="bg-white/5 backdrop-blur-md rounded-2xl p-3 border border-white/10">
+              <div className="text-xs text-blue-200 font-medium">{t('Completed Today')}</div>
+              <div className="text-2xl font-black mt-0.5 text-emerald-300">{queueData.summary.completedCount}</div>
+            </div>
+            <div className="bg-white/5 backdrop-blur-md rounded-2xl p-3 border border-white/10">
+              <div className="text-xs text-blue-200 font-medium">{t('Avg Consultation')}</div>
+              <div className="text-2xl font-black mt-0.5 text-white">{queueData.summary.avgConsultationTime} {t('mins')}</div>
             </div>
           </div>
-          <div className="bg-white/5 backdrop-blur-md rounded-2xl p-3 border border-white/10">
-            <div className="text-xs text-blue-200 font-medium">Waiting in Queue</div>
-            <div className="text-2xl font-black mt-0.5 text-white">{queueData.summary.totalWaiting}</div>
-          </div>
-          <div className="bg-white/5 backdrop-blur-md rounded-2xl p-3 border border-white/10">
-            <div className="text-xs text-blue-200 font-medium">In Consultation</div>
-            <div className="text-2xl font-black mt-0.5 text-amber-300">
-              {queueData.summary.currentlyConsulting ? `Token #${queueData.summary.currentlyConsulting.tokenNumber}` : 'None'}
-            </div>
-          </div>
-          <div className="bg-white/5 backdrop-blur-md rounded-2xl p-3 border border-white/10">
-            <div className="text-xs text-blue-200 font-medium">Completed Today</div>
-            <div className="text-2xl font-black mt-0.5 text-emerald-300">{queueData.summary.completedCount}</div>
-          </div>
-          <div className="bg-white/5 backdrop-blur-md rounded-2xl p-3 border border-white/10">
-            <div className="text-xs text-blue-200 font-medium">Avg Consultation</div>
-            <div className="text-2xl font-black mt-0.5 text-white">{queueData.summary.avgConsultationTime} mins</div>
-          </div>
-        </div>
       </div>
 
       {/* Navigation Tabs */}
@@ -385,7 +417,7 @@ export default function DoctorDashboard() {
           }`}
         >
           <Users size={16} />
-          <span>Patient Queue ({queueData.queue?.length || 0})</span>
+          <span>{t('Patient Queue')} ({queueData.queue?.length || 0})</span>
         </button>
 
         <button
@@ -397,7 +429,7 @@ export default function DoctorDashboard() {
           }`}
         >
           <Calendar size={16} />
-          <span>Appointments ({appointments.length})</span>
+          <span>{t('Appointments')} ({appointments.length})</span>
         </button>
 
         <button
@@ -409,7 +441,7 @@ export default function DoctorDashboard() {
           }`}
         >
           <Clock size={16} />
-          <span>Schedule & Availability</span>
+          <span>{t('Schedule & Availability')}</span>
         </button>
 
         <button
@@ -421,7 +453,7 @@ export default function DoctorDashboard() {
           }`}
         >
           <User size={16} />
-          <span>Profile & Clinic Settings</span>
+          <span>{t('Profile & Clinic Settings')}</span>
         </button>
       </div>
 
@@ -434,23 +466,23 @@ export default function DoctorDashboard() {
               <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
                 <div className="flex items-center gap-4">
                   <div className="w-16 h-16 rounded-2xl bg-amber-500 text-white flex flex-col items-center justify-center font-black shadow-lg shadow-amber-500/30">
-                    <span className="text-[10px] tracking-wider uppercase font-semibold">Token</span>
+                    <span className="text-[10px] tracking-wider uppercase font-semibold">{t('Token')}</span>
                     <span className="text-2xl leading-none">#{queueData.summary.currentlyConsulting.tokenNumber}</span>
                   </div>
                   <div>
                     <div className="flex items-center gap-2">
                       <span className="px-2 py-0.5 rounded-full bg-amber-200 text-amber-900 text-xs font-bold uppercase tracking-wider">
-                        In Consultation Now
+                        {t('In Consultation Now')}
                       </span>
                     </div>
                     <h3 className="text-xl font-black text-slate-900 mt-1">
-                      {queueData.summary.currentlyConsulting.patient?.name || 'Patient'}
+                      {queueData.summary.currentlyConsulting.patient?.name || t('Patient')}
                     </h3>
                     <p className="text-xs text-slate-600 mt-0.5 flex items-center gap-2">
-                      <span>Phone: {queueData.summary.currentlyConsulting.patient?.phone || 'N/A'}</span>
+                      <span>{t('Phone')}: {queueData.summary.currentlyConsulting.patient?.phone || 'N/A'}</span>
                       <span>•</span>
                       <span>
-                        Reason: {queueData.summary.currentlyConsulting.appointment?.reason || 'General Consultation'}
+                        {t('Reason')}: {queueData.summary.currentlyConsulting.appointment?.reason || t('General Consultation')}
                       </span>
                     </p>
                   </div>
@@ -462,7 +494,7 @@ export default function DoctorDashboard() {
                     className="px-3.5 py-2.5 bg-white text-slate-700 hover:bg-slate-50 border border-slate-200 text-xs font-bold rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer"
                   >
                     <Eye size={15} />
-                    <span>View Patient</span>
+                    <span>{t('View Patient')}</span>
                   </button>
                   <button
                     onClick={() =>
@@ -472,7 +504,7 @@ export default function DoctorDashboard() {
                     className="flex-1 sm:flex-none px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-md shadow-emerald-600/20 transition-all flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
                   >
                     <CheckCircle2 size={16} />
-                    <span>Complete Consultation</span>
+                    <span>{t('Complete Consultation')}</span>
                   </button>
                 </div>
               </div>
@@ -483,8 +515,8 @@ export default function DoctorDashboard() {
           <div className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
             <div className="p-5 border-b border-slate-100 flex items-center justify-between">
               <div>
-                <h2 className="text-lg font-black text-slate-800">Today's Patient Queue</h2>
-                <p className="text-xs text-slate-500">Live order of checked-in patients</p>
+                <h2 className="text-lg font-black text-slate-800">{t("Today's Patient Queue")}</h2>
+                <p className="text-xs text-slate-500">{t('Live order of checked-in patients')}</p>
               </div>
               <button
                 onClick={handleCallNext}
@@ -492,7 +524,7 @@ export default function DoctorDashboard() {
                 className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl shadow-sm transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-40"
               >
                 <Play size={14} />
-                <span>Call Next</span>
+                <span>{t('Call Next')}</span>
               </button>
             </div>
 
@@ -501,24 +533,24 @@ export default function DoctorDashboard() {
                 <div className="w-14 h-14 bg-slate-100 text-slate-400 rounded-full flex items-center justify-center mx-auto mb-3">
                   <Users size={28} />
                 </div>
-                <h3 className="text-base font-bold text-slate-700">No Patients in Queue</h3>
+                <h3 className="text-base font-bold text-slate-700">{t('No Patients in Queue')}</h3>
                 <p className="text-xs text-slate-400 max-w-sm mx-auto mt-1">
-                  Patients will appear in the active queue as soon as they check in for their appointments today.
+                  {t('Patients will appear in the active queue as soon as they check in for their appointments today.')}
                 </p>
                 {appointments.length > 0 && (
                   <div className="mt-5 p-4 rounded-2xl bg-blue-50/70 border border-blue-100 max-w-md mx-auto">
                     <p className="text-xs font-bold text-blue-900 mb-1">
-                      📅 You have {appointments.length} booked appointment{appointments.length !== 1 ? 's' : ''} on file!
+                      📅 {t('You have')} {appointments.length} {t('booked appointment')}{appointments.length !== 1 ? 's' : ''} {t('on file')}!
                     </p>
                     <p className="text-[11px] text-blue-600 mb-3">
-                      View all patient details, IDs, dates, time slots, and status in the Appointments tab.
+                      {t('View all patient details, IDs, dates, time slots, and status in the Appointments tab.')}
                     </p>
                     <button
                       onClick={() => setActiveTab('appointments')}
                       className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl shadow-sm transition-all cursor-pointer inline-flex items-center gap-1.5"
                     >
                       <Calendar size={13} />
-                      <span>View Doctor Appointments ({appointments.length})</span>
+                      <span>{t('View Doctor Appointments')} ({appointments.length})</span>
                     </button>
                   </div>
                 )}
@@ -555,15 +587,20 @@ export default function DoctorDashboard() {
                               : 'bg-slate-100 text-slate-700'
                           }`}
                         >
-                          <span className="text-[9px] uppercase font-bold leading-none">Token</span>
+                          <span className="text-[9px] uppercase font-bold leading-none">{t('Token')}</span>
                           <span className="text-lg leading-tight">#{entry.tokenNumber}</span>
                         </div>
 
                         <div className="min-w-0">
                           <div className="flex items-center gap-2">
                             <span className="font-bold text-slate-800 text-sm truncate">
-                              {entry.patient?.name || 'Patient'}
+                              {entry.patient?.name || t('Patient')}
                             </span>
+                            {entry.isEmergency && (
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-red-100 text-red-700 border border-red-200 animate-pulse">
+                                🚨 {t('EMERGENCY')}
+                              </span>
+                            )}
                             <span
                               className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide ${
                                 isCurrent
@@ -575,15 +612,15 @@ export default function DoctorDashboard() {
                                   : 'bg-slate-100 text-slate-600'
                               }`}
                             >
-                              {entry.status}
+                              {t(entry.status)}
                             </span>
                           </div>
                           <div className="text-xs text-slate-500 flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-0.5">
-                            <span>Phone: {entry.patient?.phone || 'N/A'}</span>
+                            <span>{t('Phone')}: {entry.patient?.phone || 'N/A'}</span>
                             <span>•</span>
-                            <span>Est. Wait: {entry.estimatedWaitTime || 0} mins</span>
+                            <span>{t('Est. Wait')}: {entry.estimatedWaitTime || 0} {t('mins')}</span>
                             <span>•</span>
-                            <span>Slot: {entry.appointment?.timeSlot?.start || 'Standard'}</span>
+                            <span>{t('Slot')}: {entry.appointment?.timeSlot?.start || t('Standard')}</span>
                           </div>
                         </div>
                       </div>
@@ -593,7 +630,7 @@ export default function DoctorDashboard() {
                         <button
                           onClick={() => setSelectedPatient(entry.patient)}
                           className="p-2 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
-                          title="View Patient Info"
+                          title={t('View Patient Info')}
                         >
                           <Eye size={16} />
                         </button>
@@ -605,21 +642,21 @@ export default function DoctorDashboard() {
                               disabled={actionLoading}
                               className="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold rounded-lg transition-colors cursor-pointer"
                             >
-                              Start
+                              {t('Start')}
                             </button>
                             <button
                               onClick={() => handleUpdateStatus(entry.appointment?._id, 'completed')}
                               disabled={actionLoading}
                               className="px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs font-bold rounded-lg transition-colors cursor-pointer"
                             >
-                              Done
+                              {t('Done')}
                             </button>
                             <button
                               onClick={() => handleUpdateStatus(entry.appointment?._id, 'no-show')}
                               disabled={actionLoading}
                               className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-bold rounded-lg transition-colors cursor-pointer"
                             >
-                              No-Show
+                              {t('No-Show')}
                             </button>
                           </>
                         )}

@@ -1181,7 +1181,7 @@ export default function HomePage() {
 
             <div className="mt-4">
               <a
-                href="https://www.google.com/maps/dir/?api=1&destination=13.0205,80.1783"
+                href="https://www.google.com/maps/dir/?api=1&destination=13.0266079,80.1761188"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-900/60 hover:bg-blue-900 text-teal-300 rounded-lg text-xs font-bold transition-colors border border-blue-700/50"

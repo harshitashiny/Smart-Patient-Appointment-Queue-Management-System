@@ -48,6 +48,24 @@ const appointmentSchema = new mongoose.Schema(
       type: String,
       default: '',
     },
+    isEmergency: {
+      type: Boolean,
+      default: false,
+    },
+    priority: {
+      type: String,
+      enum: ['normal', 'urgent', 'emergency'],
+      default: 'normal',
+    },
+    emergencyType: {
+      type: String,
+      default: '',
+    },
+    triageLevel: {
+      type: String,
+      enum: ['Immediate', 'Urgent', 'High', 'Standard'],
+      default: 'Standard',
+    },
     tokenNumber: {
       type: Number,
     },

@@ -5,6 +5,7 @@ import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
 import { getFavorites, toggleFavorite } from '../utils/favoriteUtils';
 import { getDoctorPhoto } from '../utils/doctorPhotos';
+import EmergencyAppointmentModal from '../components/EmergencyAppointmentModal';
 
 const formatTime = (timeStr) => {
   if (!timeStr) return '';
@@ -84,6 +85,7 @@ export default function PatientDashboard() {
   const [loading, setLoading] = useState(true);
   const [dashData, setDashData] = useState(null);
   const [favoriteDoctors, setFavoriteDoctors] = useState([]);
+  const [showEmergencyModal, setShowEmergencyModal] = useState(false);
   const [dismissedReminders, setDismissedReminders] = useState(() => {
     try {
       return JSON.parse(localStorage.getItem('dismissedReminders') || '[]');
@@ -159,15 +161,25 @@ export default function PatientDashboard() {
           <h1 className="text-3xl font-black text-slate-800 tracking-tight">{t('Patient Dashboard')}</h1>
           <p className="text-slate-500 mt-1 font-medium">{t('Manage your appointments and track your queue in real-time.')}</p>
         </div>
-        <button
-          onClick={() => navigate('/patient/search')}
-          className="group relative px-6 py-3 font-semibold text-white rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 shadow-lg shadow-blue-500/30 hover:shadow-blue-500/50 hover:scale-105 transition-all duration-300 cursor-pointer"
-        >
-          <span className="relative z-10 flex items-center gap-2">
-            {t('Book Appointment')}
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 group-hover:translate-x-1 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>
-          </span>
-        </button>
+        <div className="flex flex-wrap gap-3">
+          <button
+            onClick={() => navigate('/patient/search')}
+            className="group relative px-6 py-3 font-semibold text-white rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 shadow-lg shadow-blue-500/30 hover:shadow-blue-500/50 hover:scale-105 transition-all duration-300 cursor-pointer"
+          >
+            <span className="relative z-10 flex items-center gap-2">
+              {t('Book Appointment')}
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 group-hover:translate-x-1 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>
+            </span>
+          </button>
+          <button
+            onClick={() => setShowEmergencyModal(true)}
+            className="group relative px-6 py-3 font-bold text-white rounded-xl bg-gradient-to-r from-red-600 to-rose-600 shadow-lg shadow-red-500/30 hover:shadow-red-500/50 hover:scale-105 transition-all duration-300 cursor-pointer animate-pulse hover:animate-none"
+          >
+            <span className="relative z-10 flex items-center gap-2">
+              🚨 {t('Emergency Appointment')}
+            </span>
+          </button>
+        </div>
       </div>
 
       {/* Reminders Banner */}
@@ -332,6 +344,11 @@ export default function PatientDashboard() {
 
                   {/* Status */}
                   <div className="flex items-center gap-3">
+                    {appt.isEmergency && (
+                      <span className="px-2.5 py-1 rounded-full text-xs font-black tracking-wide bg-red-100 text-red-700 border border-red-200 animate-pulse">
+                        🚨 {t('EMERGENCY')}
+                      </span>
+                    )}
                     <StatusBadge status={appt.status} />
                   </div>
                 </div>
@@ -488,6 +505,17 @@ export default function PatientDashboard() {
           </div>
         )}
       </div>
+
+      {/* Emergency Appointment Modal */}
+      {showEmergencyModal && (
+        <EmergencyAppointmentModal
+          onClose={() => setShowEmergencyModal(false)}
+          onSuccess={() => {
+            setShowEmergencyModal(false);
+            fetchDashboard();
+          }}
+        />
+      )}
     </div>
   );
 }

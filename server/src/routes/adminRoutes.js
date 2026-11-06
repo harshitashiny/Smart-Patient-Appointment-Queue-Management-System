@@ -1,6 +1,6 @@
 import express from 'express';
 import {
-  getDashboardStats, getUsers, approveDoctor, toggleUserActive,
+  getDashboardStats, getUsers, getPendingDoctors, approveDoctor, rejectDoctor, deleteDoctorRegistration, toggleUserActive,
   getAllAppointments, getDepartments, createDepartment, updateDepartment, deleteDepartment,
 } from '../controllers/adminController.js';
 import { protect } from '../middleware/authMiddleware.js';
@@ -13,7 +13,13 @@ router.use(protect, authorize('admin'));
 
 router.get('/dashboard', getDashboardStats);
 router.get('/users', getUsers);
+router.get('/pending-doctors', getPendingDoctors);
+router.get('/doctors/pending', getPendingDoctors);
 router.put('/users/:id/approve', approveDoctor);
+router.put('/doctors/:id/approve', approveDoctor);
+router.put('/users/:id/reject', rejectDoctor);
+router.put('/doctors/:id/reject', rejectDoctor);
+router.delete('/doctors/:id/registration', deleteDoctorRegistration);
 router.put('/users/:id/toggle-active', toggleUserActive);
 router.get('/appointments', getAllAppointments);
 router.get('/departments', getDepartments);

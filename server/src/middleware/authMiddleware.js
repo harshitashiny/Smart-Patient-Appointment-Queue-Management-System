@@ -28,6 +28,18 @@ export const protect = async (req, res, next) => {
       return sendError(res, 'Account has been deactivated', 401);
     }
 
+    // Unapproved or rejected doctors cannot use platform features
+    if (user.role === 'doctor' && (!user.isApproved || user.approvalStatus === 'rejected')) {
+      const isAuthStatusCheck = req.originalUrl && req.originalUrl.includes('/auth/me');
+      if (!isAuthStatusCheck) {
+        return sendError(
+          res,
+          'Your doctor registration is pending admin approval. Platform access is restricted until approved.',
+          403
+        );
+      }
+    }
+
     req.user = user;
     next();
   } catch (error) {

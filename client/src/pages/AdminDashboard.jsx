@@ -1,12 +1,17 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import api from '../services/api';
+import { getSocket } from '../services/socket';
+import LanguageSelector from '../components/LanguageSelector';
 import {
   ShieldCheck, Users, Calendar, Stethoscope, CheckCircle2, XCircle,
   AlertCircle, Search, Filter, Plus, Trash2, Power, RefreshCw,
-  Building, UserCheck, Clock, TrendingUp, ChevronLeft, ChevronRight
+  Building, UserCheck, UserX, Clock, TrendingUp, ChevronLeft, ChevronRight,
+  Award, Briefcase, MapPin, Mail, Phone, DollarSign, X, Check, ShieldAlert
 } from 'lucide-react';
 
 export default function AdminDashboard() {
+  const { t } = useTranslation();
   const [activeTab, setActiveTab] = useState('overview'); // 'overview' | 'users' | 'doctors' | 'appointments' | 'departments'
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
@@ -23,10 +28,20 @@ export default function AdminDashboard() {
       cancelledToday: 0,
       waitingQueue: 0,
       pendingDoctors: 0,
+      rejectedDoctors: 0,
     },
     weeklyData: [],
     monthlyData: [],
     statusDistribution: [],
+  });
+
+  // Doctor Registration Approval State
+  const [doctorRequests, setDoctorRequests] = useState([]);
+  const [doctorApprovalFilter, setDoctorApprovalFilter] = useState('pending'); // 'pending' | 'rejected' | 'all'
+  const [rejectModal, setRejectModal] = useState({
+    isOpen: false,
+    request: null,
+    reason: '',
   });
 
   // Users Management State
@@ -64,6 +79,20 @@ export default function AdminDashboard() {
       console.error('Failed to fetch dashboard stats:', err);
     }
   }, []);
+
+  // Fetch Pending Doctor Requests
+  const fetchPendingDoctors = useCallback(async () => {
+    try {
+      const res = await api.get('/admin/pending-doctors', {
+        params: { status: doctorApprovalFilter },
+      });
+      if (res.data?.data) {
+        setDoctorRequests(res.data.data.requests || []);
+      }
+    } catch (err) {
+      console.error('Failed to fetch doctor requests:', err);
+    }
+  }, [doctorApprovalFilter]);
 
   // Fetch Users
   const fetchUsers = useCallback(async () => {
@@ -116,13 +145,24 @@ export default function AdminDashboard() {
   // Load all initial data
   const loadAdminData = useCallback(async () => {
     setLoading(true);
-    await Promise.all([fetchDashboardStats(), fetchUsers(), fetchAppointments(), fetchDepartments()]);
+    await Promise.all([
+      fetchDashboardStats(),
+      fetchPendingDoctors(),
+      fetchUsers(),
+      fetchAppointments(),
+      fetchDepartments(),
+    ]);
     setLoading(false);
-  }, [fetchDashboardStats, fetchUsers, fetchAppointments, fetchDepartments]);
+  }, [fetchDashboardStats, fetchPendingDoctors, fetchUsers, fetchAppointments, fetchDepartments]);
 
   useEffect(() => {
     loadAdminData();
   }, [loadAdminData]);
+
+  // Re-fetch doctor requests on filter change
+  useEffect(() => {
+    fetchPendingDoctors();
+  }, [fetchPendingDoctors]);
 
   // Re-fetch users on filter / search changes
   useEffect(() => {
@@ -134,15 +174,73 @@ export default function AdminDashboard() {
     fetchAppointments();
   }, [fetchAppointments]);
 
+  // Real-time socket updates for doctor registrations
+  useEffect(() => {
+    const socket = getSocket();
+    const handleNewDoc = () => {
+      fetchPendingDoctors();
+      fetchDashboardStats();
+      showNotification('New doctor registration request received!', 'success');
+    };
+    const handleDocUpdate = () => {
+      fetchPendingDoctors();
+      fetchDashboardStats();
+      fetchUsers();
+    };
+
+    socket.on('doctor:registration-requested', handleNewDoc);
+    socket.on('doctor:status-updated', handleDocUpdate);
+
+    return () => {
+      socket.off('doctor:registration-requested', handleNewDoc);
+      socket.off('doctor:status-updated', handleDocUpdate);
+    };
+  }, [fetchPendingDoctors, fetchDashboardStats, fetchUsers]);
+
   // Approve Doctor
-  const handleApproveDoctor = async (userId) => {
+  const handleApproveDoctor = async (id) => {
     setActionLoading(true);
     try {
-      await api.put(`/admin/users/${userId}/approve`);
-      showNotification('Doctor approved successfully!', 'success');
-      await Promise.all([fetchUsers(), fetchDashboardStats()]);
+      await api.put(`/admin/doctors/${id}/approve`);
+      showNotification('Doctor registration approved! Doctor can now log in.', 'success');
+      await Promise.all([fetchPendingDoctors(), fetchDashboardStats(), fetchUsers()]);
     } catch (err) {
       showNotification(err.response?.data?.message || 'Failed to approve doctor', 'error');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // Reject Doctor
+  const handleRejectDoctor = async (e) => {
+    if (e && e.preventDefault) e.preventDefault();
+    if (!rejectModal.request) return;
+    const id = rejectModal.request.user?._id || rejectModal.request._id;
+    const finalReason = rejectModal.reason.trim() || 'Medical credentials could not be verified by hospital administration.';
+
+    setActionLoading(true);
+    try {
+      await api.put(`/admin/doctors/${id}/reject`, { reason: finalReason });
+      showNotification('Doctor registration request rejected.', 'success');
+      setRejectModal({ isOpen: false, request: null, reason: '' });
+      await Promise.all([fetchPendingDoctors(), fetchDashboardStats(), fetchUsers()]);
+    } catch (err) {
+      showNotification(err.response?.data?.message || 'Failed to reject doctor', 'error');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // Delete Doctor Registration
+  const handleDeleteDoctor = async (id) => {
+    if (!window.confirm('Are you sure you want to permanently delete this doctor registration record?')) return;
+    setActionLoading(true);
+    try {
+      await api.delete(`/admin/doctors/${id}/registration`);
+      showNotification('Doctor registration record deleted.', 'success');
+      await Promise.all([fetchPendingDoctors(), fetchDashboardStats(), fetchUsers()]);
+    } catch (err) {
+      showNotification(err.response?.data?.message || 'Failed to delete record', 'error');
     } finally {
       setActionLoading(false);
     }
@@ -199,8 +297,6 @@ export default function AdminDashboard() {
     }
   };
 
-  const pendingDoctorsList = users.filter((u) => u.role === 'doctor' && !u.isApproved);
-
   return (
     <div className="space-y-6 max-w-7xl mx-auto pb-12 animate-in fade-in">
       {/* Toast Alert */}
@@ -227,17 +323,17 @@ export default function AdminDashboard() {
             <div>
               <div className="flex items-center gap-2">
                 <span className="px-2.5 py-0.5 rounded-full bg-blue-500/30 text-blue-200 border border-blue-400/30 text-[11px] font-bold tracking-wide uppercase">
-                  Administrator Console
+                  {t('Administrator Console')}
                 </span>
                 {dashboardStats.stats.pendingDoctors > 0 && (
                   <span className="px-2.5 py-0.5 rounded-full bg-amber-500/30 text-amber-200 border border-amber-400/30 text-[11px] font-bold">
-                    {dashboardStats.stats.pendingDoctors} Pending Approval
+                    {dashboardStats.stats.pendingDoctors} {t('Pending Approval')}
                   </span>
                 )}
               </div>
-              <h1 className="text-2xl sm:text-3xl font-black tracking-tight mt-1">SmartCare Central Control</h1>
+              <h1 className="text-2xl sm:text-3xl font-black tracking-tight mt-1">{t('SmartCare Central Control')}</h1>
               <p className="text-slate-300 text-xs sm:text-sm mt-0.5 font-medium">
-                Manage doctors, patients, departments, and system queues
+                {t('Manage doctors, patients, departments, and system queues')}
               </p>
             </div>
           </div>
@@ -245,12 +341,12 @@ export default function AdminDashboard() {
           <button
             onClick={() => {
               loadAdminData();
-              showNotification('Data refreshed', 'success');
+              showNotification(t('Data refreshed'), 'success');
             }}
             className="p-3 bg-white/10 hover:bg-white/20 text-white rounded-xl backdrop-blur-sm border border-white/20 transition-all cursor-pointer flex items-center gap-2 text-xs font-bold"
           >
             <RefreshCw size={16} />
-            <span>Refresh</span>
+            <span>{t('Refresh')}</span>
           </button>
         </div>
 
@@ -286,7 +382,7 @@ export default function AdminDashboard() {
           }`}
         >
           <TrendingUp size={16} />
-          <span>System Overview</span>
+          <span>{t('System Overview')}</span>
         </button>
 
         <button
@@ -298,7 +394,7 @@ export default function AdminDashboard() {
           }`}
         >
           <Stethoscope size={16} />
-          <span>Doctor Approvals ({dashboardStats.stats.pendingDoctors})</span>
+          <span>{t('Doctor Approvals')} ({dashboardStats.stats.pendingDoctors})</span>
         </button>
 
         <button
@@ -310,7 +406,7 @@ export default function AdminDashboard() {
           }`}
         >
           <Users size={16} />
-          <span>All Users ({userPagination.total})</span>
+          <span>{t('All Users')} ({userPagination.total})</span>
         </button>
 
         <button
@@ -322,7 +418,7 @@ export default function AdminDashboard() {
           }`}
         >
           <Calendar size={16} />
-          <span>Appointments ({dashboardStats.stats.totalAppointments})</span>
+          <span>{t('Appointments')} ({dashboardStats.stats.totalAppointments})</span>
         </button>
 
         <button
@@ -334,7 +430,7 @@ export default function AdminDashboard() {
           }`}
         >
           <Building size={16} />
-          <span>Departments ({departments.length})</span>
+          <span>{t('Departments')} ({departments.length})</span>
         </button>
       </div>
 
@@ -403,62 +499,239 @@ export default function AdminDashboard() {
       {/* Tab 2: Doctor Approvals */}
       {activeTab === 'doctors' && (
         <div className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
-          <div className="p-5 border-b border-slate-100 flex items-center justify-between">
+          <div className="p-5 sm:p-6 border-b border-slate-100 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
             <div>
-              <h2 className="text-lg font-black text-slate-800">Pending Doctor Registrations</h2>
-              <p className="text-xs text-slate-500">
-                Verify medical credentials and approve doctor accounts to grant login access
+              <div className="flex items-center gap-2">
+                <h2 className="text-lg font-black text-slate-800">Doctor Registration Requests</h2>
+                <span className="px-2.5 py-0.5 rounded-full bg-blue-100 text-blue-800 font-bold text-xs">
+                  {doctorRequests.length} Total
+                </span>
+              </div>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Review credential submissions, clinical expertise, and approve or reject doctor registrations.
               </p>
+            </div>
+
+            {/* Filter Tabs */}
+            <div className="flex items-center gap-1.5 p-1 bg-slate-100 rounded-xl">
+              <button
+                onClick={() => setDoctorApprovalFilter('pending')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                  doctorApprovalFilter === 'pending'
+                    ? 'bg-white text-slate-900 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Pending ({dashboardStats.stats.pendingDoctors || 0})
+              </button>
+              <button
+                onClick={() => setDoctorApprovalFilter('rejected')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                  doctorApprovalFilter === 'rejected'
+                    ? 'bg-white text-slate-900 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Rejected ({dashboardStats.stats.rejectedDoctors || 0})
+              </button>
+              <button
+                onClick={() => setDoctorApprovalFilter('all')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                  doctorApprovalFilter === 'all'
+                    ? 'bg-white text-slate-900 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                All Requests
+              </button>
             </div>
           </div>
 
-          {pendingDoctorsList.length === 0 ? (
-            <div className="text-center py-16 px-4">
-              <CheckCircle2 size={36} className="mx-auto text-emerald-500 mb-2" />
-              <h3 className="text-sm font-bold text-slate-700">No Pending Approvals</h3>
-              <p className="text-xs text-slate-400 mt-0.5">All registered doctors have been verified and approved.</p>
+          {doctorRequests.length === 0 ? (
+            <div className="text-center py-20 px-4">
+              <div className="w-16 h-16 rounded-3xl bg-emerald-50 text-emerald-600 mx-auto mb-3 flex items-center justify-center shadow-inner">
+                <CheckCircle2 size={36} />
+              </div>
+              <h3 className="text-base font-bold text-slate-800">
+                {doctorApprovalFilter === 'pending'
+                  ? 'No Pending Doctor Requests'
+                  : doctorApprovalFilter === 'rejected'
+                  ? 'No Rejected Requests'
+                  : 'No Doctor Requests Found'}
+              </h3>
+              <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
+                {doctorApprovalFilter === 'pending'
+                  ? 'All doctor registrations have been reviewed. New submissions will appear here automatically.'
+                  : 'There are currently no doctor applications under this filter.'}
+              </p>
             </div>
           ) : (
             <div className="divide-y divide-slate-100">
-              {pendingDoctorsList.map((doc) => (
-                <div key={doc._id} className="p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-                  <div className="flex items-center gap-3">
-                    <div className="w-12 h-12 rounded-2xl bg-amber-100 text-amber-800 font-black flex items-center justify-center shrink-0">
-                      {doc.name?.replace(/^Dr\.\s*/i, '').charAt(0)}
+              {doctorRequests.map((req) => {
+                const docUser = req.user || {};
+                const docProfile = req.doctor || {};
+                const isPending = req.status === 'pending' || (!docUser.isApproved && req.status !== 'rejected');
+                const isRejected = req.status === 'rejected' || docUser.approvalStatus === 'rejected';
+                const isApproved = docUser.isApproved && !isRejected;
+
+                return (
+                  <div key={req._id} className="p-6 transition-colors hover:bg-slate-50/50 space-y-4">
+                    {/* Top Row: Doctor Info & Badges */}
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                      <div className="flex items-start gap-4">
+                        <div
+                          className={`w-14 h-14 rounded-2xl flex items-center justify-center text-lg font-black shrink-0 shadow-xs ${
+                            isRejected
+                              ? 'bg-rose-100 text-rose-800 border border-rose-200'
+                              : isApproved
+                              ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                              : 'bg-amber-100 text-amber-900 border border-amber-200'
+                          }`}
+                        >
+                          {docUser.name?.replace(/^Dr\.\s*/i, '').charAt(0) || 'D'}
+                        </div>
+                        <div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <h3 className="font-black text-slate-900 text-base">
+                              {docUser.name?.startsWith('Dr.') ? docUser.name : `Dr. ${docUser.name}`}
+                            </h3>
+                            {isPending && (
+                              <span className="px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-200 text-[10px] font-black uppercase tracking-wider">
+                                Pending Approval
+                              </span>
+                            )}
+                            {isRejected && (
+                              <span className="px-2.5 py-0.5 rounded-full bg-rose-100 text-rose-800 border border-rose-200 text-[10px] font-black uppercase tracking-wider">
+                                Rejected
+                              </span>
+                            )}
+                            {isApproved && (
+                              <span className="px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200 text-[10px] font-black uppercase tracking-wider">
+                                Approved & Active
+                              </span>
+                            )}
+                            <span className="px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200 text-[10px] font-bold">
+                              {docProfile.specialization || 'General Medicine'}
+                            </span>
+                          </div>
+
+                          <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500 mt-1">
+                            <span className="flex items-center gap-1">
+                              <Mail size={13} className="text-slate-400" />
+                              <span>{docUser.email}</span>
+                            </span>
+                            {docUser.phone && (
+                              <span className="flex items-center gap-1">
+                                <Phone size={13} className="text-slate-400" />
+                                <span>{docUser.phone}</span>
+                              </span>
+                            )}
+                            <span className="flex items-center gap-1">
+                              <Clock size={13} className="text-slate-400" />
+                              <span>Registered {new Date(req.createdAt || docUser.createdAt).toLocaleDateString()}</span>
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Action Buttons */}
+                      <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+                        {!isApproved && (
+                          <button
+                            onClick={() => handleApproveDoctor(docUser._id)}
+                            disabled={actionLoading}
+                            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all shadow-sm hover:shadow cursor-pointer disabled:opacity-50"
+                          >
+                            <UserCheck size={15} />
+                            <span>Approve Doctor</span>
+                          </button>
+                        )}
+
+                        {!isRejected && (
+                          <button
+                            onClick={() =>
+                              setRejectModal({
+                                isOpen: true,
+                                request: req,
+                                reason: '',
+                              })
+                            }
+                            disabled={actionLoading}
+                            className="px-3.5 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
+                          >
+                            <UserX size={15} />
+                            <span>Reject</span>
+                          </button>
+                        )}
+
+                        {isRejected && (
+                          <button
+                            onClick={() => handleDeleteDoctor(docUser._id)}
+                            disabled={actionLoading}
+                            className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-colors cursor-pointer"
+                            title="Delete Application"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        )}
+                      </div>
                     </div>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="font-bold text-slate-800 text-sm">{doc.name}</span>
-                        <span className="px-2 py-0.5 bg-amber-100 text-amber-800 rounded-full text-[10px] font-bold uppercase">
-                          Pending Verification
+
+                    {/* Doctor Details Grid */}
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-slate-50/70 p-3.5 rounded-2xl border border-slate-100 text-xs">
+                      <div>
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+                          Qualification
+                        </span>
+                        <span className="font-semibold text-slate-800">
+                          {docProfile.qualification || 'MBBS'}
                         </span>
                       </div>
-                      <p className="text-xs text-slate-500 mt-0.5">
-                        <span>{doc.email}</span> • <span>{doc.phone || 'Phone on file'}</span> •{' '}
-                        <span>Registered {new Date(doc.createdAt).toLocaleDateString()}</span>
-                      </p>
+                      <div>
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+                          Experience
+                        </span>
+                        <span className="font-semibold text-slate-800">
+                          {docProfile.experienceDisplay || `${docProfile.experience || 3}+ years`}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+                          Consultation Fee
+                        </span>
+                        <span className="font-semibold text-slate-800">
+                          ₹{docProfile.consultationFee || 600}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+                          Clinic / Hospital
+                        </span>
+                        <span className="font-semibold text-slate-800 truncate block">
+                          {docProfile.clinicName || 'SmartCare Clinic'}
+                        </span>
+                      </div>
                     </div>
-                  </div>
 
-                  <div className="flex items-center gap-2 w-full sm:w-auto">
-                    <button
-                      onClick={() => handleApproveDoctor(doc._id)}
-                      disabled={actionLoading}
-                      className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
-                    >
-                      <UserCheck size={16} />
-                      <span>Approve Doctor</span>
-                    </button>
-                    <button
-                      onClick={() => handleToggleUser(doc._id)}
-                      disabled={actionLoading}
-                      className="px-3 py-2 bg-slate-100 hover:bg-rose-50 hover:text-rose-600 text-slate-600 rounded-xl text-xs font-bold transition-colors cursor-pointer"
-                    >
-                      Deactivate
-                    </button>
+                    {/* Bio or Rejection Reason Note */}
+                    {isRejected && req.rejectionReason && (
+                      <div className="p-3 bg-rose-50/80 border border-rose-100 rounded-xl text-xs text-rose-900 flex items-start gap-2">
+                        <AlertCircle size={15} className="text-rose-600 shrink-0 mt-0.5" />
+                        <div>
+                          <strong className="font-bold">Rejection Reason:</strong>{' '}
+                          <span>{req.rejectionReason}</span>
+                        </div>
+                      </div>
+                    )}
+
+                    {docProfile.bio && (
+                      <p className="text-xs text-slate-500 italic">
+                        "{docProfile.bio}"
+                      </p>
+                    )}
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
@@ -538,14 +811,45 @@ export default function AdminDashboard() {
                     <td className="py-3.5 px-4">
                       {u.role === 'doctor' ? (
                         u.isApproved ? (
-                          <span className="text-emerald-600 font-bold text-[11px]">Approved</span>
+                          <span className="px-2.5 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full font-bold text-[10px]">
+                            Approved
+                          </span>
+                        ) : u.approvalStatus === 'rejected' ? (
+                          <div className="flex items-center gap-1.5">
+                            <span className="px-2 py-0.5 bg-rose-50 text-rose-700 border border-rose-200 rounded-full font-bold text-[10px]">
+                              Rejected
+                            </span>
+                            <button
+                              onClick={() => handleApproveDoctor(u._id)}
+                              className="px-2 py-0.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[10px] font-bold cursor-pointer"
+                              title="Re-approve Doctor"
+                            >
+                              Approve
+                            </button>
+                          </div>
                         ) : (
-                          <button
-                            onClick={() => handleApproveDoctor(u._id)}
-                            className="px-2 py-1 bg-amber-100 text-amber-800 hover:bg-amber-200 rounded-lg text-[10px] font-bold uppercase cursor-pointer"
-                          >
-                            Approve Now
-                          </button>
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              onClick={() => handleApproveDoctor(u._id)}
+                              className="px-2 py-0.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[10px] font-bold cursor-pointer"
+                              title="Approve Doctor"
+                            >
+                              Approve
+                            </button>
+                            <button
+                              onClick={() =>
+                                setRejectModal({
+                                  isOpen: true,
+                                  request: { user: u },
+                                  reason: '',
+                                })
+                              }
+                              className="px-2 py-0.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-lg text-[10px] font-bold cursor-pointer"
+                              title="Reject Doctor"
+                            >
+                              Reject
+                            </button>
+                          </div>
                         )
                       ) : (
                         <span className="text-slate-400">—</span>
@@ -755,6 +1059,88 @@ export default function AdminDashboard() {
                   </button>
                 </div>
               ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Rejection Modal */}
+      {rejectModal.isOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-100 space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2 text-rose-600">
+                <ShieldAlert size={22} />
+                <h3 className="font-black text-slate-900 text-base">Reject Doctor Registration</h3>
+              </div>
+              <button
+                onClick={() => setRejectModal({ isOpen: false, request: null, reason: '' })}
+                className="p-1.5 text-slate-400 hover:text-slate-600 rounded-xl hover:bg-slate-100 transition-colors cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-600">
+              Specify reason for declining registration for{' '}
+              <strong>{rejectModal.request?.user?.name || 'this doctor'}</strong>. This explanation will be shown if they attempt to sign in.
+            </p>
+
+            {/* Quick Reason Presets */}
+            <div>
+              <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1.5">
+                Quick Preset Reasons:
+              </span>
+              <div className="flex flex-wrap gap-1.5">
+                {[
+                  'Medical license or credentials could not be verified',
+                  'Incomplete specialization documentation',
+                  'Hospital department quota currently fulfilled',
+                  'Incorrect or unverifiable contact information',
+                ].map((preset) => (
+                  <button
+                    key={preset}
+                    type="button"
+                    onClick={() => setRejectModal((prev) => ({ ...prev, reason: preset }))}
+                    className="text-[11px] px-2.5 py-1 bg-slate-100 hover:bg-rose-50 hover:text-rose-700 text-slate-700 rounded-lg font-medium transition-colors cursor-pointer text-left"
+                  >
+                    + {preset}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Reason Textarea */}
+            <div>
+              <label className="text-xs font-bold text-slate-700 block mb-1">
+                Reason / Explanation:
+              </label>
+              <textarea
+                rows={3}
+                required
+                value={rejectModal.reason}
+                onChange={(e) => setRejectModal((prev) => ({ ...prev, reason: e.target.value }))}
+                placeholder="Enter explanation for rejection..."
+                className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:bg-white focus:outline-none focus:border-rose-500"
+              />
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setRejectModal({ isOpen: false, request: null, reason: '' })}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleRejectDoctor}
+                disabled={actionLoading || !rejectModal.reason.trim()}
+                className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-rose-500/20 cursor-pointer disabled:opacity-50"
+              >
+                Confirm Rejection
+              </button>
             </div>
           </div>
         </div>

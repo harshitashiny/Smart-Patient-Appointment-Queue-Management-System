@@ -47,7 +47,7 @@ export const createAppointment = async (req, res) => {
       status: { $nin: ['cancelled', 'no-show'] },
     });
 
-    if (slotBookingCount >= maxPerSlot) {
+    if (slotBookingCount >= maxPerSlot && !req.body.isEmergency) {
       // Slot is full — find alternative slots with availability
       const requestedDate = new Date(date);
       const dayNames = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
@@ -129,8 +129,12 @@ export const createAppointment = async (req, res) => {
       date: appointmentDate,
       timeSlot,
       reason: reason || '',
-      status: 'confirmed',
+      status: req.body.isEmergency ? 'checked-in' : 'confirmed',
       tokenNumber: existingCount + 1,
+      isEmergency: !!req.body.isEmergency,
+      priority: req.body.priority || (req.body.isEmergency ? 'emergency' : 'normal'),
+      emergencyType: req.body.emergencyType || '',
+      triageLevel: req.body.isEmergency ? 'Immediate' : 'Standard',
     });
 
     // Create notification for patient
@@ -515,5 +519,175 @@ export const checkIn = async (req, res) => {
   } catch (error) {
     console.error('Check-in error:', error);
     return sendError(res, 'Failed to check in', 500);
+  }
+};
+
+/**
+ * POST /api/appointments/emergency - Create fast-track emergency appointment
+ */
+export const createEmergencyAppointment = async (req, res) => {
+  try {
+    const { doctor: doctorInput, emergencyType, reason, notes, phone } = req.body;
+
+    let doctorId = null;
+    let doctorProfile = null;
+
+    if (doctorInput) {
+      doctorProfile = await Doctor.findById(doctorInput).populate('user', '_id name phone');
+      if (!doctorProfile) {
+        doctorProfile = await Doctor.findOne({ user: doctorInput }).populate('user', '_id name phone');
+      }
+      if (doctorProfile) {
+        doctorId = doctorProfile.user._id || doctorProfile.user;
+      }
+    }
+
+    // If no doctor was provided, auto-assign first available approved doctor in Emergency/General Medicine/Cardiology
+    if (!doctorId) {
+      const allDoctors = await Doctor.find()
+        .populate({
+          path: 'user',
+          match: { role: 'doctor', isApproved: true, isActive: true },
+          select: '_id name email phone'
+        })
+        .populate('department', 'name');
+
+      const approvedDocs = allDoctors.filter((d) => d.user);
+      if (approvedDocs.length > 0) {
+        const preferred = approvedDocs.find((d) =>
+          /emergency|general medicine|cardiology|critical/i.test(d.specialization || d.department?.name || '')
+        ) || approvedDocs[0];
+        doctorProfile = preferred;
+        doctorId = preferred.user._id;
+      } else {
+        return sendError(res, 'No emergency doctors currently available on duty. Please call 10 57 10 immediately.', 404);
+      }
+    }
+
+    const now = new Date();
+    const dateStart = new Date(now); dateStart.setHours(0, 0, 0, 0);
+    const dateEnd = new Date(now); dateEnd.setHours(23, 59, 59, 999);
+
+    const curH = now.getHours().toString().padStart(2, '0');
+    const curM = now.getMinutes().toString().padStart(2, '0');
+    const endMins = (now.getMinutes() + 30) % 60;
+    const endH = (now.getHours() + Math.floor((now.getMinutes() + 30) / 60)) % 24;
+    const timeSlot = {
+      start: `${curH}:${curM}`,
+      end: `${endH.toString().padStart(2, '0')}:${endMins.toString().padStart(2, '0')}`,
+    };
+
+    const countToday = await Appointment.countDocuments({
+      date: { $gte: dateStart, $lte: dateEnd },
+      isEmergency: true,
+    });
+
+    const appointmentId = `EMG-${now.getFullYear().toString().slice(-2)}${(now.getMonth() + 1).toString().padStart(2, '0')}-${(countToday + 1).toString().padStart(3, '0')}`;
+
+    const appointment = await Appointment.create({
+      appointmentId,
+      patient: req.user._id,
+      doctor: doctorId,
+      date: now,
+      timeSlot,
+      reason: reason || emergencyType || 'Immediate Emergency Care Required',
+      notes: notes || `Contact: ${phone || req.user.phone || 'On file'}`,
+      status: 'checked-in',
+      isEmergency: true,
+      priority: 'emergency',
+      emergencyType: emergencyType || 'General Medical Emergency',
+      triageLevel: 'Immediate',
+      tokenNumber: countToday + 1,
+    });
+
+    // Create queue entry with highest priority (position 1)
+    await Queue.updateMany(
+      {
+        doctor: doctorId,
+        date: { $gte: dateStart, $lte: dateEnd },
+        status: 'waiting',
+      },
+      { $inc: { position: 1 } }
+    );
+
+    const queueEntry = await Queue.create({
+      appointment: appointment._id,
+      patient: req.user._id,
+      doctor: doctorId,
+      tokenNumber: countToday + 1,
+      position: 1,
+      status: 'waiting',
+      isEmergency: true,
+      priority: 'emergency',
+      checkInTime: now,
+      date: now,
+      estimatedWaitTime: 0,
+    });
+
+    // Notify patient
+    await Notification.create({
+      user: req.user._id,
+      title: '🚨 Emergency Appointment Confirmed',
+      message: `Emergency token #${countToday + 1} (${appointmentId}) confirmed. Please proceed directly to the MIOT Emergency Triage Desk.`,
+      type: 'emergency-appointment',
+      relatedAppointment: appointment._id,
+    });
+
+    // Notify doctor
+    await Notification.create({
+      user: doctorId,
+      title: '🚨 EMERGENCY PATIENT ALERT',
+      message: `PRIORITY EMERGENCY: Patient ${req.user.name} checked in for ${emergencyType || 'urgent medical care'}. Immediate consultation required!`,
+      type: 'emergency-appointment',
+      relatedAppointment: appointment._id,
+    });
+
+    // Notify admins
+    try {
+      const User = (await import('../models/User.js')).default;
+      const admins = await User.find({ role: 'admin' });
+      for (const admin of admins) {
+        await Notification.create({
+          user: admin._id,
+          title: '🚨 Emergency Patient Checked In',
+          message: `Emergency patient ${req.user.name} allocated to Dr. ${doctorProfile?.user?.name || 'On-Duty Specialist'}.`,
+          type: 'emergency-appointment',
+          relatedAppointment: appointment._id,
+        });
+      }
+    } catch (e) {}
+
+    // Emit live socket event
+    try {
+      const io = getIO();
+      io.emit('emergency:new', {
+        appointment,
+        queueEntry,
+        patient: { _id: req.user._id, name: req.user.name, phone: req.user.phone },
+        doctor: doctorId,
+      });
+      io.to(`queue:${doctorId}`).emit('queue:updated');
+      io.to(`user:${doctorId}`).emit('notification:new', {
+        title: '🚨 PRIORITY EMERGENCY PATIENT',
+        message: `Patient ${req.user.name} requires immediate medical triage!`,
+      });
+    } catch (e) {}
+
+    const populatedAppointment = await Appointment.findById(appointment._id)
+      .populate('doctor', 'name email phone avatar')
+      .populate('patient', 'name email phone');
+
+    return sendSuccess(
+      res,
+      {
+        appointment: populatedAppointment,
+        queueEntry,
+      },
+      'Emergency appointment registered with highest priority! Please proceed to the Emergency Room.',
+      201
+    );
+  } catch (error) {
+    console.error('createEmergencyAppointment error:', error);
+    return sendError(res, error.message || 'Failed to register emergency appointment', 500);
   }
 };

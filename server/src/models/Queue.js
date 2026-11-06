@@ -30,6 +30,15 @@ const queueEntrySchema = new mongoose.Schema(
       enum: ['waiting', 'next', 'in-consultation', 'completed', 'skipped', 'no-show'],
       default: 'waiting',
     },
+    isEmergency: {
+      type: Boolean,
+      default: false,
+    },
+    priority: {
+      type: String,
+      enum: ['normal', 'urgent', 'emergency'],
+      default: 'normal',
+    },
     checkInTime: {
       type: Date,
       default: Date.now,

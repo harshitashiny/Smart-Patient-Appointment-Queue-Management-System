@@ -1,6 +1,6 @@
 import express from 'express';
 import {
-  createAppointment, getAppointments, getAppointmentById,
+  createAppointment, createEmergencyAppointment, getAppointments, getAppointmentById,
   updateAppointment, deleteAppointment, checkIn,
 } from '../controllers/appointmentController.js';
 import { protect } from '../middleware/authMiddleware.js';
@@ -9,6 +9,7 @@ import { validateAppointment } from '../middleware/validationMiddleware.js';
 const router = express.Router();
 
 router.post('/', protect, validateAppointment, createAppointment);
+router.post('/emergency', protect, createEmergencyAppointment);
 router.get('/', protect, getAppointments);
 router.get('/:id', protect, getAppointmentById);
 router.put('/:id', protect, updateAppointment);

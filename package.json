@@ -1,0 +1,27 @@
+{
+  "name": "smartcare-healthcare-platform",
+  "version": "1.0.0",
+  "description": "SmartCare - Smart Patient Appointment and Queue Management System",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "npm install --prefix server && npm install --prefix client && npm run build --prefix client",
+    "start": "node server/src/server.js",
+    "postinstall": "npm install --prefix server && npm install --prefix client && npm run build --prefix client",
+    "server": "npm run dev --prefix server",
+    "client": "npm run dev --prefix client",
+    "seed": "npm run seed --prefix server"
+  },
+  "keywords": [
+    "healthcare",
+    "appointment-system",
+    "queue-management",
+    "react",
+    "nodejs",
+    "express",
+    "mongodb"
+  ],
+  "author": "",
+  "license": "ISC"
+}
+

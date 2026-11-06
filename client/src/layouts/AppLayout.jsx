@@ -3,7 +3,92 @@ import { Outlet, Navigate, Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useTranslation } from 'react-i18next';
 import LanguageSelector from '../components/LanguageSelector';
-import { Home, Calendar, Users, Stethoscope, ShieldCheck, Search, LogOut } from 'lucide-react';
+import { Home, Calendar, Users, Stethoscope, ShieldCheck, Search, LogOut, Clock, ShieldAlert, RefreshCw } from 'lucide-react';
+
+export const PendingApprovalNotice = ({ user }) => {
+  const { logout, fetchUser } = useAuth();
+  const [checking, setChecking] = React.useState(false);
+  const isRejected = user?.approvalStatus === 'rejected';
+
+  const handleRefresh = async () => {
+    setChecking(true);
+    try {
+      await fetchUser();
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  return (
+    <div className="min-h-[75vh] flex items-center justify-center p-4">
+      <div className="max-w-md w-full bg-white rounded-3xl p-8 border border-slate-200/80 shadow-2xl text-center space-y-6 animate-in fade-in">
+        <div
+          className={`w-20 h-20 rounded-3xl mx-auto flex items-center justify-center shadow-lg ${
+            isRejected ? 'bg-rose-100 text-rose-600' : 'bg-amber-100 text-amber-600'
+          }`}
+        >
+          {isRejected ? <ShieldAlert size={40} /> : <Clock size={40} className="animate-pulse" />}
+        </div>
+
+        <div>
+          <span
+            className={`px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider ${
+              isRejected ? 'bg-rose-100 text-rose-800' : 'bg-amber-100 text-amber-800'
+            }`}
+          >
+            {isRejected ? 'Registration Declined' : 'Verification In Progress'}
+          </span>
+          <h2 className="text-2xl font-black text-slate-800 mt-2">
+            {isRejected ? 'Account Request Declined' : 'Doctor Approval Pending'}
+          </h2>
+          <p className="text-slate-500 text-xs mt-1">
+            Welcome, <strong>Dr. {user?.name}</strong>.
+          </p>
+        </div>
+
+        <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200/60 text-xs text-slate-600 text-left space-y-2">
+          {isRejected ? (
+            <>
+              <p className="font-bold text-rose-700">Administrator Remarks:</p>
+              <p className="text-slate-600 italic">
+                {user?.rejectionReason || 'Your submitted medical credentials could not be verified by the hospital administration.'}
+              </p>
+            </>
+          ) : (
+            <>
+              <p className="font-semibold text-slate-700">
+                Hospital Verification Required:
+              </p>
+              <p>
+                Your registration has been submitted to the hospital administrator for credentials verification. You will be able to access the doctor console and patient queue once approved.
+              </p>
+            </>
+          )}
+        </div>
+
+        <div className="flex flex-col sm:flex-row gap-3 pt-2">
+          {!isRejected && (
+            <button
+              onClick={handleRefresh}
+              disabled={checking}
+              className="flex-1 py-3 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-blue-500/20 cursor-pointer disabled:opacity-50 flex items-center justify-center gap-1.5"
+            >
+              <RefreshCw size={14} className={checking ? 'animate-spin' : ''} />
+              <span>{checking ? 'Checking...' : 'Check Status'}</span>
+            </button>
+          )}
+          <button
+            onClick={logout}
+            className="flex-1 py-3 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5"
+          >
+            <LogOut size={14} />
+            <span>Sign Out</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 export const ProtectedRoute = ({ allowedRoles }) => {
   const { user, loading } = useAuth();
@@ -18,6 +103,11 @@ export const ProtectedRoute = ({ allowedRoles }) => {
 
   if (allowedRoles && !allowedRoles.includes(user.role)) {
     return <Navigate to="/unauthorized" replace />;
+  }
+
+  // Doctors must be approved by admin before accessing protected features
+  if (user.role === 'doctor' && (!user.isApproved || user.approvalStatus === 'rejected')) {
+    return <PendingApprovalNotice user={user} />;
   }
 
   return <Outlet />;
@@ -45,7 +135,14 @@ export const AppLayout = () => {
             <span>📞 {t('Appointments')}: <strong>+91 44 42002288</strong></span>
           </a>
           <span className="text-blue-300/40 hidden md:inline">|</span>
-          <span className="text-slate-300 hidden md:inline">📍 {t('4/112, Mount Poonamallee Road, Manapakkam, Chennai - 600089')}</span>
+          <a
+            href="https://www.google.com/maps/dir/?api=1&destination=13.0266079,80.1761188"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-slate-300 hidden md:inline hover:text-teal-300 transition-colors"
+          >
+            📍 {t('4/112, Mount Poonamallee Road, Manapakkam, Chennai - 600089')}
+          </a>
         </div>
         <div className="flex items-center gap-3 text-slate-300">
           <span className="hidden lg:inline text-[10px] text-teal-300 font-bold uppercase tracking-wider">{t('1000-Bed Quaternary Care Hospital')}</span>

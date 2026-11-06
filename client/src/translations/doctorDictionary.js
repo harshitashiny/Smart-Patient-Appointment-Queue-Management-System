@@ -1,5 +1,3 @@
-import fs from 'fs';
-
 const doctorTranslations = {
   names: {
     "Dr. M. S. Meenakshi": { ta: "டாக்டர் எம். எஸ். மீனாட்சி", te: "డాక్టర్ ఎం. ఎస్. మీనాక్షి", hi: "डॉ. एम. एस. मीनाक्षी" },

@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { useAuth } from '../contexts/AuthContext';
 import LanguageSelector from '../components/LanguageSelector';
 import MiotMegaMenu from '../components/MiotMegaMenu';
+import HospitalMapDirections from '../components/HospitalMapDirections';
 import hospitalBannerImg from '../assets/miot_hospital_banner.jpg';
 
 export default function ContactUs() {
@@ -305,41 +306,9 @@ export default function ContactUs() {
               </p>
             </div>
 
-            {/* ── INTERACTIVE GOOGLE MAP (IMAGE 2) ── */}
-            <div className="mt-8 rounded-2xl overflow-hidden border border-slate-200 shadow-md">
-              <div className="p-3 bg-slate-50 border-b border-slate-200 flex items-center justify-between text-xs font-bold">
-                <div className="flex items-center gap-2">
-                  <span className="text-red-600 text-lg">📍</span>
-                  <div>
-                    <span className="text-slate-900 block font-black">MIOT International</span>
-                    <span className="text-[11px] text-slate-500 font-normal">4/112, Mount Poonamallee Rd, Manapakkam, Chennai - 600089</span>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-amber-500 font-black">★ 4.5 (6,912)</span>
-                  <a
-                    href="https://www.google.com/maps/dir/?api=1&destination=13.0205,80.1783"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition-colors"
-                  >
-                    {t('Directions')} ↗
-                  </a>
-                </div>
-              </div>
-
-              {/* Embedded Google Map iframe */}
-              <iframe
-                title="MIOT International Hospital Map"
-                src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3887.1423851508215!2d80.17611887588325!3d13.026607913670966!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x3a5260b64d1f5ea1%3A0xe54625b1b46dae85!2sMIOT%20International!5e0!3m2!1sen!2sin!4v1700000000000!5m2!1sen!2sin"
-                width="100%"
-                height="320"
-                style={{ border: 0 }}
-                allowFullScreen=""
-                loading="lazy"
-                referrerPolicy="no-referrer-when-downgrade"
-                className="w-full"
-              ></iframe>
+            {/* ── INTERACTIVE GOOGLE MAP & LIVE DIRECTIONS COMPONENT ── */}
+            <div className="mt-8">
+              <HospitalMapDirections />
             </div>
 
             {/* ── EMERGENCY SECTION & ENQUIRY BUTTON (IMAGE 3) ── */}
@@ -402,7 +371,7 @@ export default function ContactUs() {
               </li>
               <li>
                 <a
-                  href="https://www.google.com/maps/dir/?api=1&destination=13.0205,80.1783"
+                  href="https://www.google.com/maps/dir/?api=1&destination=MIOT+International,+4%2F112+Mount+Poonamallee+Road+Manapakkam+Chennai&destination_place_id=ChIJoV4fTLZiUjoRhc1txbEle%2BU"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="hover:text-amber-300 transition-colors flex items-center gap-2"
@@ -510,7 +479,7 @@ export default function ContactUs() {
                 {t('LINKS')}
               </h4>
               <ul className="space-y-1.5 text-xs text-blue-700 font-semibold">
-                <li><a href="https://www.google.com/maps/dir/?api=1&destination=13.0205,80.1783" target="_blank" rel="noopener noreferrer" className="hover:underline">{t('Location')}</a></li>
+                <li><a href="https://www.google.com/maps/dir/?api=1&destination=13.0266079,80.1761188" target="_blank" rel="noopener noreferrer" className="hover:underline">{t('Location')}</a></li>
                 <li><Link to="/patient/home#facilities" className="hover:underline">{t('International Patient Care')}</Link></li>
                 <li><Link to="/patient/home#about" className="hover:underline">{t('Visiting Hours')}</Link></li>
                 <li><Link to="/patient/home#about" className="hover:underline">{t('Privacy Policy')}</Link></li>

@@ -5,6 +5,17 @@ import { useTranslation } from 'react-i18next';
 import api from '../services/api';
 import LanguageSelector from '../components/LanguageSelector';
 
+const resolveAvatarUrl = (avatar) => {
+  if (!avatar) return null;
+  if (avatar.startsWith('http://') || avatar.startsWith('https://') || avatar.startsWith('data:') || avatar.startsWith('blob:')) {
+    return avatar;
+  }
+  const base = import.meta.env.VITE_API_URL
+    ? import.meta.env.VITE_API_URL.replace(/\/+$/, '').replace(/\/api$/, '')
+    : (import.meta.env.PROD ? '' : 'http://localhost:5000');
+  return `${base}${avatar.startsWith('/') ? '' : '/'}${avatar}`;
+};
+
 const PatientProfile = () => {
   const { user, fetchUser } = useAuth();
   const { t } = useTranslation();
@@ -37,11 +48,7 @@ const PatientProfile = () => {
         preferredLang: user.preferredLang || 'en'
       });
       if (user.avatar) {
-        setAvatarPreview(
-          user.avatar.startsWith('http')
-            ? user.avatar
-            : `http://localhost:5000${user.avatar}`
-        );
+        setAvatarPreview(resolveAvatarUrl(user.avatar));
       }
     }
   }, [user]);
@@ -116,11 +123,7 @@ const PatientProfile = () => {
 
       const avatarUrl = res.data?.data?.avatar;
       if (avatarUrl) {
-        setAvatarPreview(
-          avatarUrl.startsWith('http')
-            ? avatarUrl
-            : `http://localhost:5000${avatarUrl}`
-        );
+        setAvatarPreview(resolveAvatarUrl(avatarUrl));
       }
 
       if (fetchUser) await fetchUser();
@@ -129,11 +132,7 @@ const PatientProfile = () => {
       setError(err.response?.data?.message || t('Failed to upload photo'));
       // Revert preview
       if (user?.avatar) {
-        setAvatarPreview(
-          user.avatar.startsWith('http')
-            ? user.avatar
-            : `http://localhost:5000${user.avatar}`
-        );
+        setAvatarPreview(resolveAvatarUrl(user.avatar));
       } else {
         setAvatarPreview(null);
       }

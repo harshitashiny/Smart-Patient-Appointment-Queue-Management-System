@@ -23,8 +23,8 @@ export const AuthProvider = ({ children }) => {
       setProfile(res.data.data.profile);
     } catch (error) {
       console.error('Error fetching user:', error);
-      // Only clear token if it's actually invalid/expired (401), not a network error
-      if (error.response && error.response.status === 401) {
+      // Only clear token if it's invalid/expired (401) or forbidden (403 pending approval), not network error
+      if (error.response && (error.response.status === 401 || error.response.status === 403)) {
         localStorage.removeItem('token');
         setUser(null);
         setProfile(null);
@@ -41,18 +41,23 @@ export const AuthProvider = ({ children }) => {
 
   const login = async (email, password) => {
     const res = await api.post('/auth/login', { email, password });
-    localStorage.setItem('token', res.data.data.token);
-    setUser(res.data.data.user);
-    // Fetch profile data additionally since login payload might just have user
-    await fetchUser();
+    if (res.data?.data?.token) {
+      localStorage.setItem('token', res.data.data.token);
+      setUser(res.data.data.user);
+      // Fetch profile data additionally since login payload might just have user
+      await fetchUser();
+    }
     return res.data;
   };
 
   const register = async (userData) => {
     const res = await api.post('/auth/register', userData);
-    localStorage.setItem('token', res.data.data.token);
-    setUser(res.data.data.user);
-    await fetchUser();
+    // Only persist session if an active token was issued (e.g. approved patients)
+    if (res.data?.data?.token) {
+      localStorage.setItem('token', res.data.data.token);
+      setUser(res.data.data.user);
+      await fetchUser();
+    }
     return res.data;
   };
 

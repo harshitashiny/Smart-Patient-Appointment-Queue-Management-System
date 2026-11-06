@@ -5,6 +5,8 @@ import Appointment from '../models/Appointment.js';
 import Queue from '../models/Queue.js';
 import Department from '../models/Department.js';
 import MedicalRecord from '../models/MedicalRecord.js';
+import Notification from '../models/Notification.js';
+import { getIO } from '../config/socket.js';
 import { sendSuccess, sendError } from '../utils/responseHandler.js';
 
 /**
@@ -27,6 +29,7 @@ export const getDashboardStats = async (req, res) => {
       cancelledToday,
       waitingQueue,
       pendingDoctors,
+      rejectedDoctors,
     ] = await Promise.all([
       User.countDocuments({ role: 'patient' }),
       User.countDocuments({ role: 'doctor', isApproved: true }),
@@ -35,7 +38,8 @@ export const getDashboardStats = async (req, res) => {
       Appointment.countDocuments({ date: { $gte: dateStart, $lte: dateEnd }, status: 'completed' }),
       Appointment.countDocuments({ date: { $gte: dateStart, $lte: dateEnd }, status: 'cancelled' }),
       Queue.countDocuments({ date: { $gte: dateStart, $lte: dateEnd }, status: { $in: ['waiting', 'next'] } }),
-      User.countDocuments({ role: 'doctor', isApproved: false }),
+      User.countDocuments({ role: 'doctor', isApproved: false, approvalStatus: { $ne: 'rejected' } }),
+      User.countDocuments({ role: 'doctor', approvalStatus: 'rejected' }),
     ]);
 
     // Weekly data (last 7 days)
@@ -88,6 +92,7 @@ export const getDashboardStats = async (req, res) => {
         cancelledToday,
         waitingQueue,
         pendingDoctors,
+        rejectedDoctors,
       },
       weeklyData,
       monthlyData,
@@ -96,6 +101,60 @@ export const getDashboardStats = async (req, res) => {
   } catch (error) {
     console.error('Dashboard error:', error);
     return sendError(res, 'Failed to fetch dashboard data', 500);
+  }
+};
+
+/**
+ * GET /api/admin/pending-doctors - Get all pending/rejected doctor registration requests
+ */
+export const getPendingDoctors = async (req, res) => {
+  try {
+    const { status = 'all' } = req.query;
+    const userFilter = { role: 'doctor' };
+
+    if (status === 'pending') {
+      userFilter.$or = [
+        { isApproved: false, approvalStatus: { $ne: 'rejected' } },
+        { approvalStatus: 'pending' },
+      ];
+    } else if (status === 'rejected') {
+      userFilter.approvalStatus = 'rejected';
+    } else if (status === 'approved') {
+      userFilter.isApproved = true;
+    } else {
+      // 'all' pending or rejected
+      userFilter.$or = [
+        { isApproved: false },
+        { approvalStatus: { $in: ['pending', 'rejected'] } },
+      ];
+    }
+
+    const users = await User.find(userFilter)
+      .select('-password')
+      .sort({ createdAt: -1 });
+
+    const userIds = users.map((u) => u._id);
+    const doctors = await Doctor.find({ user: { $in: userIds } })
+      .populate('department', 'name');
+
+    const doctorByUserId = {};
+    doctors.forEach((doc) => {
+      doctorByUserId[doc.user.toString()] = doc;
+    });
+
+    const requests = users.map((u) => ({
+      _id: u._id,
+      user: u,
+      doctor: doctorByUserId[u._id.toString()] || null,
+      status: u.approvalStatus || (u.isApproved ? 'approved' : 'pending'),
+      rejectionReason: u.rejectionReason || '',
+      createdAt: u.createdAt,
+    }));
+
+    return sendSuccess(res, { requests });
+  } catch (error) {
+    console.error('getPendingDoctors error:', error);
+    return sendError(res, 'Failed to fetch pending doctor registrations', 500);
   }
 };
 
@@ -132,20 +191,142 @@ export const getUsers = async (req, res) => {
 };
 
 /**
- * PUT /api/admin/users/:id/approve - Approve doctor
+ * PUT /api/admin/users/:id/approve or /api/admin/doctors/:id/approve
  */
 export const approveDoctor = async (req, res) => {
   try {
-    const user = await User.findById(req.params.id);
-    if (!user) return sendError(res, 'User not found', 404);
+    let user = await User.findById(req.params.id);
+    if (!user) {
+      const doc = await Doctor.findById(req.params.id);
+      if (doc) user = await User.findById(doc.user);
+    }
+
+    if (!user) return sendError(res, 'User or doctor not found', 404);
     if (user.role !== 'doctor') return sendError(res, 'User is not a doctor', 400);
 
     user.isApproved = true;
+    user.approvalStatus = 'approved';
+    user.rejectionReason = '';
     await user.save({ validateBeforeSave: false });
 
-    return sendSuccess(res, { user }, 'Doctor approved');
+    // Send notification to the doctor
+    try {
+      await Notification.create({
+        user: user._id,
+        title: 'Registration Approved!',
+        message: 'Congratulations! Your doctor registration has been approved by the administrator. You can now log in and access your dashboard.',
+        type: 'doctor-approved',
+        data: {
+          approvedAt: new Date(),
+        },
+      });
+    } catch (notifErr) {
+      console.error('Error creating approval notification:', notifErr);
+    }
+
+    // Socket notification
+    try {
+      const io = getIO();
+      io.to(`user:${user._id}`).emit('doctor:approved', {
+        userId: user._id,
+        name: user.name,
+      });
+      io.emit('doctor:status-updated', {
+        userId: user._id,
+        status: 'approved',
+      });
+    } catch (socketErr) {
+      // Socket may not have listeners
+    }
+
+    return sendSuccess(res, { user }, 'Doctor approved successfully');
   } catch (error) {
+    console.error('Approve doctor error:', error);
     return sendError(res, 'Failed to approve doctor', 500);
+  }
+};
+
+/**
+ * PUT /api/admin/users/:id/reject or /api/admin/doctors/:id/reject
+ */
+export const rejectDoctor = async (req, res) => {
+  try {
+    const { reason = 'Registration request declined by hospital administrator.' } = req.body;
+
+    let user = await User.findById(req.params.id);
+    if (!user) {
+      const doc = await Doctor.findById(req.params.id);
+      if (doc) user = await User.findById(doc.user);
+    }
+
+    if (!user) return sendError(res, 'User or doctor not found', 404);
+    if (user.role !== 'doctor') return sendError(res, 'User is not a doctor', 400);
+
+    user.isApproved = false;
+    user.approvalStatus = 'rejected';
+    user.rejectionReason = reason;
+    await user.save({ validateBeforeSave: false });
+
+    // Send notification to the doctor
+    try {
+      await Notification.create({
+        user: user._id,
+        title: 'Registration Request Declined',
+        message: `Your doctor registration was not approved: ${reason}`,
+        type: 'doctor-rejected',
+        data: {
+          rejectedAt: new Date(),
+          reason,
+        },
+      });
+    } catch (notifErr) {
+      console.error('Error creating rejection notification:', notifErr);
+    }
+
+    // Socket notification
+    try {
+      const io = getIO();
+      io.to(`user:${user._id}`).emit('doctor:rejected', {
+        userId: user._id,
+        reason,
+      });
+      io.emit('doctor:status-updated', {
+        userId: user._id,
+        status: 'rejected',
+      });
+    } catch (socketErr) {
+      // Socket may not have listeners
+    }
+
+    return sendSuccess(res, { user }, 'Doctor registration rejected');
+  } catch (error) {
+    console.error('Reject doctor error:', error);
+    return sendError(res, 'Failed to reject doctor', 500);
+  }
+};
+
+/**
+ * DELETE /api/admin/doctors/:id/registration - Delete registration request
+ */
+export const deleteDoctorRegistration = async (req, res) => {
+  try {
+    let user = await User.findById(req.params.id);
+    if (!user) {
+      const doc = await Doctor.findById(req.params.id);
+      if (doc) user = await User.findById(doc.user);
+    }
+
+    if (!user) return sendError(res, 'User not found', 404);
+    if (user.role !== 'doctor') return sendError(res, 'User is not a doctor', 400);
+
+    await Doctor.deleteOne({ user: user._id });
+    await Notification.deleteMany({ user: user._id });
+    await User.findByIdAndDelete(user._id);
+
+    return sendSuccess(res, null, 'Doctor registration record deleted');
+  } catch (error) {
+    console.error('Delete registration error:', error);
+    return sendError(res, 'Failed to delete registration record', 500);
   }
 };
 

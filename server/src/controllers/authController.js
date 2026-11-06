@@ -3,9 +3,10 @@ import crypto from 'crypto';
 import User from '../models/User.js';
 import Patient from '../models/Patient.js';
 import Doctor from '../models/Doctor.js';
-import { sendSuccess, sendError } from '../utils/responseHandler.js';
-
+import Notification from '../models/Notification.js';
 import Department from '../models/Department.js';
+import { getIO } from '../config/socket.js';
+import { sendSuccess, sendError } from '../utils/responseHandler.js';
 
 const generateToken = (id) => {
   return jwt.sign({ id }, process.env.JWT_SECRET, {
@@ -49,7 +50,7 @@ export const register = async (req, res) => {
 
     const isDoctor = role === 'doctor';
 
-    // Create user - Note: doctors start with isApproved: false (pending admin approval)
+    // Create user - Note: doctors start with isApproved: false, approvalStatus: 'pending' (pending admin approval)
     const user = await User.create({
       name: name?.trim(),
       email: email?.trim().toLowerCase(),
@@ -59,6 +60,7 @@ export const register = async (req, res) => {
       age: parsedAge,
       gender: safeGender,
       isApproved: !isDoctor, // doctors require admin approval
+      approvalStatus: isDoctor ? 'pending' : 'approved',
     });
 
     const standardSlots = [
@@ -89,7 +91,7 @@ export const register = async (req, res) => {
         });
       }
 
-      await Doctor.create({
+      const createdDoctor = await Doctor.create({
         user: user._id,
         specialization: specialization || 'General Medicine',
         department: dept ? dept._id : undefined,
@@ -112,6 +114,66 @@ export const register = async (req, res) => {
           { day: 'sunday', isAvailable: false, slots: [], breakSlots: [] },
         ]),
       });
+
+      // Send registration request notification to all Admins
+      try {
+        const admins = await User.find({ role: 'admin' });
+        for (const admin of admins) {
+          await Notification.create({
+            user: admin._id,
+            title: 'New Doctor Registration Request',
+            message: `Dr. ${user.name} (${specialization || 'General Medicine'}) has submitted a registration request for admin approval.`,
+            type: 'doctor-registration',
+            data: {
+              doctorId: createdDoctor._id,
+              userId: user._id,
+              doctorName: user.name,
+              doctorEmail: user.email,
+              specialization: specialization || 'General Medicine',
+              qualification: qualification || 'MBBS',
+            },
+          });
+        }
+      } catch (notifErr) {
+        console.error('Error creating admin notifications for doctor registration:', notifErr);
+      }
+
+      // Realtime notification via Socket.IO
+      try {
+        const io = getIO();
+        io.emit('doctor:registration-requested', {
+          doctorId: createdDoctor._id,
+          userId: user._id,
+          name: user.name,
+          email: user.email,
+          specialization: specialization || 'General Medicine',
+          createdAt: user.createdAt,
+        });
+      } catch (socketErr) {
+        // Socket may not have active listeners
+      }
+
+      // Do NOT issue an active JWT token to unapproved doctor
+      return sendSuccess(
+        res,
+        {
+          user: {
+            _id: user._id,
+            name: user.name,
+            email: user.email,
+            role: user.role,
+            phone: user.phone,
+            age: user.age,
+            gender: user.gender,
+            isApproved: false,
+            approvalStatus: 'pending',
+            preferredLang: user.preferredLang,
+          },
+          token: null,
+        },
+        'Doctor registration submitted successfully. Your request has been sent to the administrator for verification and approval.',
+        201
+      );
     } else {
       await Patient.create({ user: user._id, gender: safeGender });
     }
@@ -130,13 +192,12 @@ export const register = async (req, res) => {
           age: user.age,
           gender: user.gender,
           isApproved: user.isApproved,
+          approvalStatus: user.approvalStatus,
           preferredLang: user.preferredLang,
         },
         token,
       },
-      isDoctor
-        ? 'Doctor registration successful. Your profile is submitted for admin approval.'
-        : 'Registration successful',
+      'Registration successful',
       201
     );
   } catch (error) {
@@ -201,8 +262,22 @@ export const login = async (req, res) => {
       }
     }
 
-    if (user.role === 'doctor' && !user.isApproved) {
-      return sendError(res, 'Your account is pending admin approval', 403);
+    if (user.role === 'doctor') {
+      if (user.approvalStatus === 'rejected') {
+        const reasonText = user.rejectionReason ? ` Reason: ${user.rejectionReason}` : '';
+        return sendError(
+          res,
+          `Your doctor registration request has been rejected by the administrator.${reasonText}`,
+          403
+        );
+      }
+      if (!user.isApproved || user.approvalStatus === 'pending') {
+        return sendError(
+          res,
+          'Your account is pending admin approval. You will receive access once approved by an administrator.',
+          403
+        );
+      }
     }
 
     // Update last login
@@ -222,6 +297,8 @@ export const login = async (req, res) => {
         gender: user.gender,
         avatar: user.avatar,
         isApproved: user.isApproved,
+        approvalStatus: user.approvalStatus,
+        rejectionReason: user.rejectionReason,
         preferredLang: user.preferredLang,
       },
       token,
